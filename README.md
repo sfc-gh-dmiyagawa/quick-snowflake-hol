@@ -54,7 +54,7 @@ Amazon Quick から Snowflake Cortex Agent に自然言語で質問できる環�
 | データ | 取引の SKU と製品カタログの SKU が一致せず製品の結合が0件 → ティア×請求サイクル単位の `PRODUCT_PLAN_VIEW` で結合 |
 | 権限 | テーブル作成前の `GRANT SELECT ON ALL TABLES`、Agent への GRANT 漏れを修正 |
 | Quick 接続 | OAuth のセカンダリロールを `NONE`（推奨設定）、DEFAULT_ROLE・DEFAULT_WAREHOUSE の設定、`ALLOWED_INTERFACES` の確認（制限されていると Quick がログインを繰り返す） |
-| Flow | `CHURN_RISK_SCORE < 0.3`（スコアは0〜100のため0件）を `< 30` に修正、SKU 不一致を踏まえたティア単位の結合を指示、自然言語の質問1回＋Flow 側で計算する形に変更（[`docs/flow_prompt_expansion_opportunities.md`](docs/flow_prompt_expansion_opportunities.md)） |
+| Flow | `CHURN_RISK_SCORE < 0.3`（スコアは0〜100のため0件）を `< 30` に修正、SKU 不一致を踏まえたティア単位の結合を指示、自然言語の質問1回＋Flow 側で計算する形に変更（[Quick ガイド 7章](docs/02_quick_setup_guide_ja.md#7-flow-を作る)） |
 | 日本語化 | Semantic View の日本語同義語、日本語で回答する Agent の指示 |
 
 詳細は [`docs/01_snowflake_overview_ja.md`](docs/01_snowflake_overview_ja.md) を参照してください。
