@@ -168,7 +168,7 @@ Flow は、決まった手順を自動で実行してレポートを作る機能
 > - Agent には **自然言語の質問を1回だけ** 送り、計算は Flow 側で行います（SQL を送るとエラーになるため）。
 
 1. 左のナビゲーションで **Flows** → **Create Flow** をクリックします。
-2. プロンプト欄に次を貼り、**Generate** をクリックします（[`flow_prompt_expansion_opportunities.md`](flow_prompt_expansion_opportunities.md) と同じ内容です）。
+2. プロンプト欄に次を貼り、**Generate** をクリックします。
 
    ```text
    Analyze customer expansion opportunities and produce one complete downloadable report.
