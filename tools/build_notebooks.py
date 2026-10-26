@@ -749,7 +749,9 @@ if RUN_CLEANUP:
     if RESTORE_DEFAULT_ROLE:
         stmts.append(f'ALTER USER "{hol_user}" SET DEFAULT_ROLE = \\'{RESTORE_DEFAULT_ROLE}\\'')
     if DROP_BASE_OBJECTS:
-        stmts += [f"DROP DATABASE IF EXISTS {DB}", f"DROP WAREHOUSE IF EXISTS {HOL_WH}", f"DROP ROLE IF EXISTS {HOL_ROLE}"]
+        stmts += [f"DROP DATABASE IF EXISTS {DB}", f"DROP WAREHOUSE IF EXISTS {HOL_WH}", f"DROP ROLE IF EXISTS {HOL_ROLE}",
+                  # load.sql で作った Git 連携（ワークスペースを Git から作った場合、先にワークスペースを削除してください）
+                  "DROP DATABASE IF EXISTS QUICK_HOL_GIT_DB", "DROP API INTEGRATION IF EXISTS QUICK_HOL_GIT_INTEGRATION"]
     for s in stmts:
         session.sql(s).collect()
         print("OK:", s)

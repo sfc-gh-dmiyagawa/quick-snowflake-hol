@@ -19,6 +19,7 @@ Amazon Quick から Snowflake Cortex Agent に自然言語で質問できる環�
 | [`docs/02_quick_setup_guide_ja.md`](docs/02_quick_setup_guide_ja.md) | Amazon Quick 側：コネクタ・Space・Chat Agent・Flow | 約40分 |
 | [`docs/troubleshooting_ja.md`](docs/troubleshooting_ja.md) | よくあるエラーと対処 | － |
 | [`docs/01_snowflake_overview_ja.md`](docs/01_snowflake_overview_ja.md) | 元教材のスキルとの対応表、変更点 | － |
+| [`load.sql`](load.sql) | Git リポジトリからワークスペースを作るための API 統合・Git リポジトリ作成 | 約1分 |
 | [`sql/00_setup.sql`](sql/00_setup.sql) | 01 と同じデータ準備を SQL ワークシートで一括実行する版 | 約3分 |
 
 ## 必要なもの
@@ -29,10 +30,19 @@ Amazon Quick から Snowflake Cortex Agent に自然言語で質問できる環�
 
 ## 進め方
 
-1. Snowsight で **Projects » Workspaces** を開き、`notebooks/` の3ファイルをアップロードします（Git 連携のワークスペースでも構いません）。
-2. `01_data_setup.ipynb` を開き、接続先を **Run on container**・コンピュートプール **`SYSTEM_COMPUTE_POOL_CPU`** にして、**Run all** で上から実行します。
-3. `02` → `03` の順に同じように実行します。03 の Step 5 に Quick で使う値が表示されます。
-4. [`docs/02_quick_setup_guide_ja.md`](docs/02_quick_setup_guide_ja.md) に沿って Quick 側を設定します。
+1. **Git 連携の準備**：Snowsight の SQL ワークシートに [`load.sql`](load.sql) を貼り付けて「すべて実行」します（API 統合と Git リポジトリを作成。公開リポジトリなので認証情報は不要）。
+2. **ワークスペースを作成**：**Projects » Workspaces** » 左上のワークスペース名 » **From Git repository** を選び、次を入力します。
+
+   | 項目 | 値 |
+   |---|---|
+   | Repository URL | `https://github.com/sfc-gh-dmiyagawa/quick-snowflake-hol` |
+   | API integration | `QUICK_HOL_GIT_INTEGRATION` |
+   | 認証 | Public repository |
+
+   > Git 連携を使わない場合は、`notebooks/` の3ファイルをダウンロードしてワークスペースにアップロードしても構いません。
+3. `notebooks/01_data_setup.ipynb` を開き、接続先を **Run on container**・コンピュートプール **`SYSTEM_COMPUTE_POOL_CPU`** にして、**Run all** で上から実行します。
+4. `02` → `03` の順に同じように実行します。03 の Step 5 に Quick で使う値が表示されます。
+5. [`docs/02_quick_setup_guide_ja.md`](docs/02_quick_setup_guide_ja.md) に沿って Quick 側を設定します。
 
 > 💡 03 の Step 3 で、実行ユーザーの **DEFAULT_ROLE をハンズオン用ロールに変更**します。トライアルの初期ロール ACCOUNTADMIN では Quick から OAuth でログインできないためです。変更後も `USE ROLE ACCOUNTADMIN` で管理者作業はできます。元に戻す方法は 03 の末尾にあります。
 
