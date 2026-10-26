@@ -1,0 +1,587 @@
+CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML(
+  'CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA',
+  $$
+name: SALES_OPS_SEMANTIC_VIEW
+description: >
+  Semantic view for Sales Operations analytics covering revenue, pipeline health,
+  rep performance, customer segmentation, product mix, and marketing attribution.
+  営業オペレーション分析用（売上、パイプライン、営業担当の実績、顧客、製品、マーケティング）。
+
+tables:
+  - name: TRANSACTIONS
+    description: Sales transactions fact table with closed deals, revenue, and attribution. 受注済み取引。
+    synonyms: [deals, sales, orders, closed deals, 取引, 受注, 売上明細]
+    base_table:
+      database: CORTEX_QUICK_HOL_DB
+      schema: CORTEX_QUICK_HOL_SCHEMA
+      table: SALES_TRANSACTIONS_FACT_TABLE
+    primary_key:
+      columns: [TRANSACTION_ID]
+    dimensions:
+      - name: TRANSACTION_ID
+        synonyms: [deal id, order id, 取引ID]
+        description: Unique transaction identifier
+        expr: TRANSACTION_ID
+        data_type: TEXT
+      - name: REGION
+        synonyms: [geo, geography, 地域, リージョン, エリア]
+        description: "Geographic region: North America, EMEA, APAC, LATAM"
+        expr: REGION
+        data_type: TEXT
+        sample_values: [North America, EMEA, APAC, LATAM]
+      - name: LEAD_SOURCE
+        synonyms: [source, acquisition channel, リードソース, 流入経路]
+        description: "Lead source: Inbound, Outbound, Event, Partner"
+        expr: LEAD_SOURCE
+        data_type: TEXT
+        sample_values: [Inbound, Outbound, Event, Partner]
+      - name: CUSTOMER_ID
+        description: Foreign key to customers dimension
+        expr: CUSTOMER_ID
+        data_type: TEXT
+      - name: PRODUCT_SKU
+        description: Foreign key to products dimension
+        expr: PRODUCT_SKU
+        data_type: TEXT
+      - name: SALES_REP_ID
+        description: Foreign key to sales reps dimension
+        expr: SALES_REP_ID
+        data_type: TEXT
+    time_dimensions:
+      - name: TRANSACTION_DATE
+        synonyms: [close date, sale date, deal date, 取引日, 受注日]
+        description: Date the transaction was recorded
+        expr: TRANSACTION_DATE
+        data_type: DATE
+      - name: FORECAST_CLOSE_DATE
+        synonyms: [expected close, forecasted date, 予定クローズ日]
+        description: Originally forecasted close date
+        expr: FORECAST_CLOSE_DATE
+        data_type: DATE
+      - name: ACTUAL_CLOSE_DATE
+        synonyms: [real close date, 実クローズ日]
+        description: Actual date the deal closed
+        expr: ACTUAL_CLOSE_DATE
+        data_type: DATE
+    facts:
+      - name: DEAL_SIZE_USD
+        synonyms: [deal value, revenue, amount, ARR, 取引金額, 受注金額]
+        description: Deal size in USD
+        expr: DEAL_SIZE_USD
+        data_type: NUMBER
+      - name: QUANTITY
+        synonyms: [units, qty, 数量]
+        description: Quantity of product units
+        expr: QUANTITY
+        data_type: NUMBER
+      - name: DISCOUNT_PERCENTAGE
+        synonyms: [discount, discount pct, 値引率, 割引率]
+        description: Discount percentage applied
+        expr: DISCOUNT_PERCENTAGE
+        data_type: NUMBER
+      - name: SALES_CYCLE_DAYS
+        synonyms: [cycle length, time to close, 商談期間, セールスサイクル]
+        description: Days from opportunity creation to close
+        expr: SALES_CYCLE_DAYS
+        data_type: NUMBER
+      - name: CLOSE_PROBABILITY_AT_START
+        synonyms: [initial probability, 初期受注確度]
+        description: Win probability at deal start
+        expr: CLOSE_PROBABILITY_AT_START
+        data_type: NUMBER
+    metrics:
+      - name: TOTAL_REVENUE
+        synonyms: [total sales, gross revenue, 売上, 売上合計, 総売上]
+        description: Total revenue in USD
+        expr: SUM(DEAL_SIZE_USD)
+      - name: TOTAL_DEALS
+        synonyms: [deal count, number of deals, 取引件数, 受注件数]
+        description: Total number of transactions
+        expr: COUNT(TRANSACTION_ID)
+      - name: AVG_DEAL_SIZE
+        synonyms: [average deal, mean deal size, 平均取引金額, 平均単価]
+        description: Average deal size in USD
+        expr: AVG(DEAL_SIZE_USD)
+      - name: AVG_DISCOUNT
+        synonyms: [average discount, 平均値引率]
+        description: Average discount percentage
+        expr: AVG(DISCOUNT_PERCENTAGE)
+      - name: AVG_SALES_CYCLE
+        synonyms: [average cycle, mean time to close, 平均商談期間]
+        description: Average days to close
+        expr: AVG(SALES_CYCLE_DAYS)
+
+  - name: CUSTOMERS
+    description: Customer dimension with firmographics, LTV, churn risk, expansion potential. 顧客マスタ。
+    synonyms: [accounts, clients, companies, 顧客, 取引先, 企業]
+    base_table:
+      database: CORTEX_QUICK_HOL_DB
+      schema: CORTEX_QUICK_HOL_SCHEMA
+      table: CUSTOMER_DIMENSION_TABLE
+    primary_key:
+      columns: [CUSTOMER_ID]
+    dimensions:
+      - name: CUSTOMER_ID
+        synonyms: [account id, client id, 顧客ID]
+        description: Unique customer identifier
+        expr: CUSTOMER_ID
+        data_type: TEXT
+      - name: COMPANY_NAME
+        synonyms: [account name, company, client name, 会社名, 顧客名]
+        description: Customer company name
+        expr: COMPANY_NAME
+        data_type: TEXT
+      - name: INDUSTRY
+        synonyms: [vertical, sector, 業種, 業界]
+        description: "Industry: Technology, Finance, Healthcare, Manufacturing, Retail"
+        expr: INDUSTRY
+        data_type: TEXT
+        sample_values: [Technology, Finance, Healthcare, Manufacturing, Retail]
+      - name: COMPANY_SIZE
+        synonyms: [segment, account size, 企業規模, セグメント]
+        description: "Company size: SMB, Mid-Market, Enterprise"
+        expr: COMPANY_SIZE
+        data_type: TEXT
+        sample_values: [SMB, Mid-Market, Enterprise]
+      - name: ANNUAL_REVENUE_BAND
+        synonyms: [revenue band, 年商規模]
+        description: Annual revenue band
+        expr: ANNUAL_REVENUE_BAND
+        data_type: TEXT
+      - name: EXPANSION_POTENTIAL
+        synonyms: [growth potential, upsell potential, 拡販余地, アップセル余地]
+        description: "Expansion potential: High, Medium, Low"
+        expr: EXPANSION_POTENTIAL
+        data_type: TEXT
+        sample_values: [High, Medium, Low]
+    time_dimensions:
+      - name: FIRST_PURCHASE_DATE
+        synonyms: [customer since, acquisition date, 初回購入日]
+        description: Date of first purchase
+        expr: FIRST_PURCHASE_DATE
+        data_type: DATE
+    facts:
+      - name: CUSTOMER_LIFETIME_VALUE
+        synonyms: [CLV, LTV, lifetime value, 顧客生涯価値]
+        description: Customer lifetime value in USD
+        expr: CUSTOMER_LIFETIME_VALUE
+        data_type: NUMBER
+      - name: CHURN_RISK_SCORE
+        synonyms: [churn risk, attrition risk, 解約リスク, チャーンリスク]
+        description: Churn risk score (0-100)
+        expr: CHURN_RISK_SCORE
+        data_type: NUMBER
+      - name: TOTAL_CONTRACTS_COUNT
+        synonyms: [contract count, 契約数]
+        description: Total contracts with this customer
+        expr: TOTAL_CONTRACTS_COUNT
+        data_type: NUMBER
+    metrics:
+      - name: AVG_LIFETIME_VALUE
+        synonyms: [average CLV, mean LTV, 平均LTV]
+        description: Average customer lifetime value
+        expr: AVG(CUSTOMER_LIFETIME_VALUE)
+      - name: AVG_CHURN_RISK
+        synonyms: [average churn risk, 平均解約リスク]
+        description: Average churn risk score
+        expr: AVG(CHURN_RISK_SCORE)
+      - name: TOTAL_CUSTOMERS
+        synonyms: [customer count, 顧客数]
+        description: Total unique customers
+        expr: COUNT(DISTINCT CUSTOMER_ID)
+
+  - name: PRODUCTS
+    description: Product catalog with pricing, tiers, renewal and upsell rates. 製品カタログ。
+    synonyms: [catalog, SKUs, product list, 製品, 商品]
+    base_table:
+      database: CORTEX_QUICK_HOL_DB
+      schema: CORTEX_QUICK_HOL_SCHEMA
+      table: PRODUCT_CATALOG_TABLE
+    primary_key:
+      columns: [PRODUCT_SKU]
+    dimensions:
+      - name: PRODUCT_SKU
+        synonyms: [SKU, product id, 製品ID]
+        description: Unique product SKU
+        expr: PRODUCT_SKU
+        data_type: TEXT
+      - name: PRODUCT_NAME
+        synonyms: [name, product, item name, 製品名, 商品名]
+        description: Product display name
+        expr: PRODUCT_NAME
+        data_type: TEXT
+      - name: PRODUCT_CATEGORY
+        synonyms: [category, product line, 製品カテゴリ]
+        description: Product category grouping
+        expr: PRODUCT_CATEGORY
+        data_type: TEXT
+      - name: PRODUCT_FEATURE
+        synonyms: [feature, capability, 機能]
+        description: Primary product feature
+        expr: PRODUCT_FEATURE
+        data_type: TEXT
+      - name: PRODUCT_TIER
+        synonyms: [tier, pricing tier, plan, edition, ティア, プラン, エディション]
+        description: "Product tier: Starter, Professional, Enterprise"
+        expr: PRODUCT_TIER
+        data_type: TEXT
+        sample_values: [Starter, Professional, Enterprise]
+      - name: BILLING_FREQUENCY
+        synonyms: [billing cycle, payment frequency, 請求サイクル]
+        description: "Billing frequency: Monthly, Annual, Multi-Year"
+        expr: BILLING_FREQUENCY
+        data_type: TEXT
+        sample_values: [Monthly, Annual, Multi-Year]
+      - name: TYPICAL_DISCOUNT_RANGE
+        synonyms: [discount range, 標準値引幅]
+        description: Typical discount range
+        expr: TYPICAL_DISCOUNT_RANGE
+        data_type: TEXT
+    facts:
+      - name: LIST_PRICE_USD
+        synonyms: [list price, MSRP, 定価]
+        description: List price in USD
+        expr: LIST_PRICE_USD
+        data_type: NUMBER
+      - name: AVERAGE_CONTRACT_LENGTH_MONTHS
+        synonyms: [contract length, avg term, 平均契約期間]
+        description: Average contract length in months
+        expr: AVERAGE_CONTRACT_LENGTH_MONTHS
+        data_type: NUMBER
+      - name: RENEWAL_RATE_PCT
+        synonyms: [renewal rate, retention rate, 更新率]
+        description: Product renewal rate percentage
+        expr: RENEWAL_RATE_PCT
+        data_type: NUMBER
+      - name: UPSELL_RATE_PCT
+        synonyms: [upsell rate, expansion rate, アップセル率]
+        description: Product upsell rate percentage
+        expr: UPSELL_RATE_PCT
+        data_type: NUMBER
+    metrics:
+      - name: AVG_LIST_PRICE
+        synonyms: [average price, 平均定価]
+        description: Average list price in USD
+        expr: AVG(LIST_PRICE_USD)
+      - name: AVG_RENEWAL_RATE
+        synonyms: [average renewal, 平均更新率]
+        description: Average renewal rate
+        expr: AVG(RENEWAL_RATE_PCT)
+
+  - name: REPS
+    description: Sales rep performance with quota, attainment, win rate, pipeline coverage. 営業担当の実績。
+    synonyms: [sales reps, salespeople, account executives, AEs, 営業担当, 営業, 担当者]
+    base_table:
+      database: CORTEX_QUICK_HOL_DB
+      schema: CORTEX_QUICK_HOL_SCHEMA
+      table: SALES_REP_PERFORMANCE_TABLE
+    primary_key:
+      columns: [SALES_REP_ID]
+    dimensions:
+      - name: SALES_REP_ID
+        synonyms: [rep id, AE id, 担当者ID]
+        description: Unique sales rep identifier
+        expr: SALES_REP_ID
+        data_type: TEXT
+      - name: REP_NAME
+        synonyms: [name, sales rep name, AE name, 担当者名, 営業担当名]
+        description: Full name of the sales rep
+        expr: REP_NAME
+        data_type: TEXT
+      - name: TERRITORY
+        synonyms: [assigned territory, sales territory, 担当エリア, テリトリー]
+        description: Sales territory assignment
+        expr: TERRITORY
+        data_type: TEXT
+    time_dimensions:
+      - name: HIRE_DATE
+        synonyms: [start date, joined date, 入社日]
+        description: Date the rep was hired
+        expr: HIRE_DATE
+        data_type: DATE
+    facts:
+      - name: QUOTA_USD
+        synonyms: [quota, target, sales target, ノルマ, 目標, クォータ]
+        description: Annual quota in USD
+        expr: QUOTA_USD
+        data_type: NUMBER
+      - name: QUOTA_ATTAINMENT_PCT
+        synonyms: [attainment, quota attainment, 目標達成率, 達成率]
+        description: Quota attainment percentage
+        expr: QUOTA_ATTAINMENT_PCT
+        data_type: NUMBER
+      - name: AVG_DEAL_SIZE
+        synonyms: [average deal, 担当者別平均取引金額]
+        description: Average deal size in USD
+        expr: AVG_DEAL_SIZE
+        data_type: NUMBER
+      - name: WIN_RATE_PCT
+        synonyms: [win rate, close rate, 受注率, 勝率]
+        description: Win rate percentage
+        expr: WIN_RATE_PCT
+        data_type: NUMBER
+      - name: AVG_SALES_CYCLE_DAYS
+        synonyms: [avg cycle, 担当者別平均商談期間]
+        description: Average days to close
+        expr: AVG_SALES_CYCLE_DAYS
+        data_type: NUMBER
+      - name: PIPELINE_COVERAGE_RATIO
+        synonyms: [coverage ratio, pipeline multiple, パイプラインカバレッジ]
+        description: Pipeline coverage ratio
+        expr: PIPELINE_COVERAGE_RATIO
+        data_type: NUMBER
+      - name: ACTIVE_OPPORTUNITIES_COUNT
+        synonyms: [active opps, open opportunities, 進行中商談数]
+        description: Active opportunity count
+        expr: ACTIVE_OPPORTUNITIES_COUNT
+        data_type: NUMBER
+    metrics:
+      - name: AVG_QUOTA_ATTAINMENT
+        synonyms: [average attainment, team attainment, 平均達成率]
+        description: Average quota attainment across reps
+        expr: AVG(QUOTA_ATTAINMENT_PCT)
+      - name: AVG_WIN_RATE
+        synonyms: [average win rate, team win rate, 平均受注率]
+        description: Average win rate across reps
+        expr: AVG(WIN_RATE_PCT)
+
+  - name: PIPELINE
+    description: Active pipeline opportunities with stages, probabilities, and engagement signals. 商談パイプライン。
+    synonyms: [opportunities, opps, deals in progress, funnel, 商談, パイプライン, 案件]
+    base_table:
+      database: CORTEX_QUICK_HOL_DB
+      schema: CORTEX_QUICK_HOL_SCHEMA
+      table: SALES_PIPELINE_OPPORTUNITIES
+    primary_key:
+      columns: [OPPORTUNITY_ID]
+    dimensions:
+      - name: OPPORTUNITY_ID
+        synonyms: [opp id, 商談ID]
+        description: Unique opportunity identifier
+        expr: OPPORTUNITY_ID
+        data_type: TEXT
+      - name: CURRENT_STAGE
+        synonyms: [stage, deal stage, pipeline stage, ステージ, フェーズ]
+        description: "Stage: Prospecting, Qualification, Proposal, Negotiation, Closed Won, Closed Lost"
+        expr: CURRENT_STAGE
+        data_type: TEXT
+        sample_values: [Prospecting, Qualification, Proposal, Negotiation, Closed Won, Closed Lost]
+      - name: COMPETITOR_PRESENT
+        synonyms: [competitive deal, has competitor, 競合あり]
+        description: Whether a competitor is present
+        expr: COMPETITOR_PRESENT
+        data_type: BOOLEAN
+      - name: DECISION_MAKER_ENGAGED
+        synonyms: [DM engaged, 決裁者接触]
+        description: Whether decision maker is engaged
+        expr: DECISION_MAKER_ENGAGED
+        data_type: BOOLEAN
+    time_dimensions:
+      - name: CREATED_DATE
+        synonyms: [opp created, date created, 商談作成日]
+        description: Opportunity creation date
+        expr: CREATED_DATE
+        data_type: DATE
+      - name: EXPECTED_CLOSE_DATE
+        synonyms: [expected close, target close date, クローズ予定日]
+        description: Expected close date
+        expr: EXPECTED_CLOSE_DATE
+        data_type: DATE
+      - name: STAGE_ENTRY_DATE
+        synonyms: [entered stage, ステージ移行日]
+        description: Date entered current stage
+        expr: STAGE_ENTRY_DATE
+        data_type: DATE
+      - name: LAST_ACTIVITY_DATE
+        synonyms: [last touch, last contact, 最終活動日]
+        description: Most recent activity date
+        expr: LAST_ACTIVITY_DATE
+        data_type: DATE
+    facts:
+      - name: ESTIMATED_VALUE
+        synonyms: [opp value, opportunity amount, 商談金額, 見込金額]
+        description: Estimated deal value in USD
+        expr: ESTIMATED_VALUE
+        data_type: NUMBER
+      - name: WEIGHTED_FORECAST_VALUE
+        synonyms: [weighted value, forecast value, 加重見込金額]
+        description: Probability-weighted forecast in USD
+        expr: WEIGHTED_FORECAST_VALUE
+        data_type: NUMBER
+      - name: CLOSE_PROBABILITY
+        synonyms: [win probability, 受注確度]
+        description: Close probability (0-100)
+        expr: CLOSE_PROBABILITY
+        data_type: NUMBER
+      - name: DAYS_IN_CURRENT_STAGE
+        synonyms: [days in stage, stage duration, ステージ滞留日数]
+        description: Days in current stage
+        expr: DAYS_IN_CURRENT_STAGE
+        data_type: NUMBER
+      - name: ACTIVITY_COUNT_LAST_30_DAYS
+        synonyms: [recent activity, activity count, 直近30日の活動数]
+        description: Activities in last 30 days
+        expr: ACTIVITY_COUNT_LAST_30_DAYS
+        data_type: NUMBER
+    metrics:
+      - name: TOTAL_PIPELINE_VALUE
+        synonyms: [pipeline value, パイプライン金額, 商談総額]
+        description: Total estimated pipeline value
+        expr: SUM(ESTIMATED_VALUE)
+      - name: TOTAL_WEIGHTED_FORECAST
+        synonyms: [weighted pipeline, total forecast, 加重パイプライン, フォーキャスト]
+        description: Total weighted forecast value
+        expr: SUM(WEIGHTED_FORECAST_VALUE)
+      - name: TOTAL_OPPORTUNITIES
+        synonyms: [opp count, 商談数]
+        description: Total opportunities
+        expr: COUNT(OPPORTUNITY_ID)
+      - name: AVG_DAYS_IN_STAGE
+        synonyms: [average stage duration, 平均滞留日数]
+        description: Average days in current stage
+        expr: AVG(DAYS_IN_CURRENT_STAGE)
+
+  - name: MARKETING
+    description: Marketing lead attribution with campaigns, lead scores, and spend. マーケティング施策とリード。
+    synonyms: [leads, campaigns, marketing leads, attribution, リード, キャンペーン, マーケティング]
+    base_table:
+      database: CORTEX_QUICK_HOL_DB
+      schema: CORTEX_QUICK_HOL_SCHEMA
+      table: MARKETING_ATTRIBUTION_TABLE
+    primary_key:
+      columns: [LEAD_ID]
+    dimensions:
+      - name: LEAD_ID
+        synonyms: [lead, marketing lead, リードID]
+        description: Unique lead identifier
+        expr: LEAD_ID
+        data_type: TEXT
+      - name: LEAD_SOURCE_DETAIL
+        synonyms: [source detail, lead channel, リード獲得チャネル]
+        description: "Lead source: Google Ads, LinkedIn, Trade Show, Webinar"
+        expr: LEAD_SOURCE_DETAIL
+        data_type: TEXT
+        sample_values: [Google Ads, LinkedIn, Trade Show, Webinar]
+      - name: CAMPAIGN_NAME
+        synonyms: [campaign, marketing campaign, キャンペーン名]
+        description: Marketing campaign name
+        expr: CAMPAIGN_NAME
+        data_type: TEXT
+      - name: FIRST_TOUCH_CHANNEL
+        synonyms: [first touch, initial channel, ファーストタッチ]
+        description: First marketing touch channel
+        expr: FIRST_TOUCH_CHANNEL
+        data_type: TEXT
+      - name: LAST_TOUCH_CHANNEL
+        synonyms: [last touch, final channel, ラストタッチ]
+        description: Last marketing touch before conversion
+        expr: LAST_TOUCH_CHANNEL
+        data_type: TEXT
+    facts:
+      - name: LEAD_SCORE
+        synonyms: [score, lead quality, MQL score, リードスコア]
+        description: Lead quality score (0-100)
+        expr: LEAD_SCORE
+        data_type: NUMBER
+      - name: LEAD_TO_OPPORTUNITY_DAYS
+        synonyms: [lead conversion time, days to opportunity, 商談化日数]
+        description: Days from lead to opportunity
+        expr: LEAD_TO_OPPORTUNITY_DAYS
+        data_type: NUMBER
+      - name: MARKETING_SPEND_ALLOCATED
+        synonyms: [spend, marketing cost, ad spend, マーケティング費用, 広告費]
+        description: Marketing spend allocated in USD
+        expr: MARKETING_SPEND_ALLOCATED
+        data_type: NUMBER
+    metrics:
+      - name: TOTAL_MARKETING_SPEND
+        synonyms: [total spend, total ad spend, マーケティング費用合計]
+        description: Total marketing spend in USD
+        expr: SUM(MARKETING_SPEND_ALLOCATED)
+      - name: AVG_LEAD_SCORE
+        synonyms: [average lead score, 平均リードスコア]
+        description: Average lead quality score
+        expr: AVG(LEAD_SCORE)
+      - name: TOTAL_LEADS
+        synonyms: [lead count, リード数]
+        description: Total marketing leads
+        expr: COUNT(LEAD_ID)
+      - name: AVG_LEAD_CONVERSION_TIME
+        synonyms: [average conversion time, 平均商談化日数]
+        description: Average days from lead to opportunity
+        expr: AVG(LEAD_TO_OPPORTUNITY_DAYS)
+
+relationships:
+  - name: TRANSACTIONS_TO_CUSTOMERS
+    left_table: TRANSACTIONS
+    right_table: CUSTOMERS
+    join_type: left_outer
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: CUSTOMER_ID
+        right_column: CUSTOMER_ID
+  - name: TRANSACTIONS_TO_PRODUCTS
+    left_table: TRANSACTIONS
+    right_table: PRODUCTS
+    join_type: left_outer
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: PRODUCT_SKU
+        right_column: PRODUCT_SKU
+  - name: TRANSACTIONS_TO_REPS
+    left_table: TRANSACTIONS
+    right_table: REPS
+    join_type: left_outer
+    relationship_type: many_to_one
+    relationship_columns:
+      - left_column: SALES_REP_ID
+        right_column: SALES_REP_ID
+
+verified_queries:
+  - name: revenue_by_region
+    question: What is the total revenue by region?
+    sql: |
+      SELECT t.REGION, SUM(t.DEAL_SIZE_USD) AS TOTAL_REVENUE
+      FROM CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_TRANSACTIONS_FACT_TABLE t
+      GROUP BY t.REGION ORDER BY TOTAL_REVENUE DESC
+  - name: top_reps_by_attainment
+    question: Which sales reps have the highest quota attainment?
+    sql: |
+      SELECT r.REP_NAME, r.TERRITORY, r.QUOTA_ATTAINMENT_PCT, r.QUOTA_USD
+      FROM CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_REP_PERFORMANCE_TABLE r
+      ORDER BY r.QUOTA_ATTAINMENT_PCT DESC LIMIT 10
+  - name: pipeline_by_stage
+    question: What is the pipeline value broken down by stage?
+    sql: |
+      SELECT p.CURRENT_STAGE, COUNT(p.OPPORTUNITY_ID) AS NUM_OPPORTUNITIES,
+        SUM(p.ESTIMATED_VALUE) AS TOTAL_VALUE,
+        SUM(p.WEIGHTED_FORECAST_VALUE) AS WEIGHTED_VALUE
+      FROM CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_PIPELINE_OPPORTUNITIES p
+      GROUP BY p.CURRENT_STAGE ORDER BY TOTAL_VALUE DESC
+  - name: revenue_by_product_tier
+    question: How does revenue break down by product tier?
+    sql: |
+      SELECT pr.PRODUCT_TIER, COUNT(t.TRANSACTION_ID) AS NUM_DEALS,
+        SUM(t.DEAL_SIZE_USD) AS TOTAL_REVENUE,
+        AVG(t.DEAL_SIZE_USD) AS AVG_DEAL_SIZE
+      FROM CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_TRANSACTIONS_FACT_TABLE t
+      JOIN CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.PRODUCT_CATALOG_TABLE pr ON t.PRODUCT_SKU = pr.PRODUCT_SKU
+      GROUP BY pr.PRODUCT_TIER ORDER BY TOTAL_REVENUE DESC
+  - name: top_customers_by_ltv
+    question: Who are the top 10 customers by lifetime value?
+    sql: |
+      SELECT c.COMPANY_NAME, c.INDUSTRY, c.COMPANY_SIZE,
+        c.CUSTOMER_LIFETIME_VALUE, c.CHURN_RISK_SCORE, c.EXPANSION_POTENTIAL
+      FROM CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.CUSTOMER_DIMENSION_TABLE c
+      ORDER BY c.CUSTOMER_LIFETIME_VALUE DESC LIMIT 10
+  - name: marketing_spend_by_source
+    question: What is the total marketing spend by lead source?
+    sql: |
+      SELECT m.LEAD_SOURCE_DETAIL, COUNT(m.LEAD_ID) AS NUM_LEADS,
+        SUM(m.MARKETING_SPEND_ALLOCATED) AS TOTAL_SPEND,
+        AVG(m.LEAD_SCORE) AS AVG_LEAD_SCORE
+      FROM CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.MARKETING_ATTRIBUTION_TABLE m
+      GROUP BY m.LEAD_SOURCE_DETAIL ORDER BY TOTAL_SPEND DESC
+$$,
+  FALSE
+)
