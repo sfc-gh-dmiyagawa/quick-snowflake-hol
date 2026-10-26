@@ -43,7 +43,8 @@
 | コネクタが `Creation in progress` のまま | 作成直後 | 数分待って画面を更新する |
 | `sales_ops_agent` がツールに出ない | HOL ロールに MCP Server の USAGE がない | 03 の Step 2 を再実行 |
 | 「権限がない」「Object does not exist」 | DEFAULT_ROLE に Agent / Semantic View / ウェアハウスの権限がない | 03 の Step 6 の最後のチェック（`CORTEX_QUICK_HOL_ROLE で ... OK`）を確認 |
-| 424 / タイムアウト | MCP の呼び出しは60秒で打ち切り。複雑な質問は時間がかかる | 質問を分けて単純にする。Flow では問い合わせを分割する（ガイドのプロンプト参照） |
+| 424 / タイムアウト | MCP の呼び出しは60秒で打ち切り。複雑な質問は時間がかかる | 質問を単純にする。Flow はガイドのプロンプト（自然言語の質問1回＋Flow 側で計算）を使う |
+| Flow がエラーで止まる・SQL を送ろうとする | プロンプトが Agent に SQL を送らせている | ガイドのプロンプト（`Do NOT write or send SQL`）を使う |
 | Flow のレポートが空・0件 | 元教材のプロンプトの `CHURN_RISK_SCORE < 0.3`（スコアは0〜100） | ガイドの修正版プロンプト（`< 30`）を使う |
 | 英語で返ってくる | Chat Agent のプロンプトに言語指定がない | ガイドのプロンプト（`Always reply in the same language as the user`）を使う |
 

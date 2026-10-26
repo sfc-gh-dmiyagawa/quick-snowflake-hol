@@ -38,7 +38,7 @@ Cortex Code スキル `sales-ops-cortex-agent-mcp-quick`（SKILL.md）が自動�
 | OAuth のセカンダリロール | `IMPLICIT` | `NONE` | MCP の推奨設定。Quick 経由ではハンズオン用ロールの権限だけで動かす |
 | ユーザー設定 | DEFAULT_ROLE のみ変更 | DEFAULT_ROLE・DEFAULT_WAREHOUSE を設定し、`ALLOWED_INTERFACES` を確認 | トライアルの初期ロール（ACCOUNTADMIN）は OAuth でブロックされるため。ALLOWED_INTERFACES が制限されていると Quick がログインを繰り返す |
 | 前提アカウント | Workshop 配布のアカウント | トライアルアカウント | AI 機能の制限・既定コンピュートプールの注意を追加 |
-| Flow のプロンプト | `CHURN_RISK_SCORE < 0.3`、製品カタログとの結合 | `< 30`、プラン単位の価格、問い合わせを3分割 | 元のままではレポートが空になる・60秒タイムアウトの回避 |
+| Flow のプロンプト | `CHURN_RISK_SCORE < 0.3`、製品カタログとの結合 | `< 30`、ティア単位のカタログ平均で結合、自然言語の質問1回＋Flow 側で計算 | 元のままではレポートが空・エラーになる |
 
 ## 確認ポイント（Stop ポイント）
 

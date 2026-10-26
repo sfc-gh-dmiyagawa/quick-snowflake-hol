@@ -162,35 +162,44 @@ Space は、コネクタ・エージェント・Flow とナレッジをまとめ
 
 Flow は、決まった手順を自動で実行してレポートを作る機能です。
 
-> ⚠️ **元教材のプロンプトからの修正点**（そのまま使うとレポートが空になります）
-> - 解約リスクスコアは **0〜100** の値です。元のプロンプトの `CHURN_RISK_SCORE < 0.3` は該当が **0件** になるため、`< 30` に直しています（該当 59 社）。
-> - 取引と製品カタログは SKU で結合できないため、「次のティアの価格」は **プラン（ティア×請求サイクル）単位の平均定価** を使うようにしています。
-> - 1回の問い合わせが 60 秒を超えるとタイムアウトするため、問い合わせを3つに分けています。
+> ⚠️ **元教材のプロンプトからの修正点**（そのまま使うとレポートが空になる・エラーになります）
+> - 解約リスクスコアは **0〜100** の値です。元の `CHURN_RISK_SCORE < 0.3` は該当が **0件** になるため `< 30` にしています。
+> - 取引と製品カタログは SKU で結合できないため、SKU の先頭（STARTER / PRO / ENT）からティアを判定し、**ティア単位のカタログ平均値**で結合するよう Agent に指示しています。
+> - Agent には **自然言語の質問を1回だけ** 送り、計算は Flow 側で行います（SQL を送るとエラーになるため）。
 
 1. 左のナビゲーションで **Flows** → **Create Flow** をクリックします。
-2. プロンプト欄に次を貼り、**Generate** をクリックします。
+2. プロンプト欄に次を貼り、**Generate** をクリックします（[`flow_prompt_expansion_opportunities.md`](flow_prompt_expansion_opportunities.md) と同じ内容です）。
 
    ```text
    Analyze customer expansion opportunities and produce one complete downloadable report.
-   Execute all queries automatically without user confirmation using the Snowflake-Sales-Ops-MCP connector.
-   Ask the connector these three questions separately (one question per call):
 
-   1. "List customers with churn risk score below 30 (the score is on a 0-100 scale) and expansion potential High or Medium. For each show company name, industry, company size, first purchase date, total spend (sum of deal size), and the highest product tier they purchased. Sort by total spend descending."
-   2. "Show the average list price, average upsell rate, and average contract length in months for each product tier and billing frequency."
-   3. "How many customers have churn risk score below 30 and expansion potential High or Medium, and what is their total revenue?"
+   DATA RETRIEVAL RULES (important):
+   - Use the Snowflake-Sales-Ops-MCP connector tool "sales_ops_agent".
+   - Send it a NATURAL-LANGUAGE question only. Do NOT write or send SQL.
+   - Make ONE data request using exactly the question below, and run it automatically without user confirmation. If the agent offers a workaround or asks to re-run, accept it automatically and proceed — never stop for confirmation.
 
-   Then, for each customer from question 1:
-   - Expansion type: Starter -> Professional, Professional -> Enterprise, Enterprise -> Expand seats (use 20% of current spend as the estimate)
-   - Revenue potential = (average list price of the next tier - average list price of the current tier) x average upsell rate of the current tier / 100
-   - Months until renewal = average contract length minus months since first purchase date (modulo the contract length)
-   - Priority: "Act Now" if renewal within 3 months, "Prepare" if 3-6 months, "Nurture" otherwise
+   "For every customer with churn risk score below 30 (scale 0-100) and expansion potential of High or Medium, return one row per customer.
+   IMPORTANT DATA NOTE: transaction PRODUCT_SKU values (STARTER-ANNUAL, PRO-MONTHLY, ENT-ANNUAL, etc.) do NOT match catalog PRODUCT_SKU values (STA-ANN-001, PRO-MON-003, ENT-MLT-007, etc.). Do NOT join transactions to products on PRODUCT_SKU. Instead:
+    1. Derive each transaction's tier from the SKU prefix: STARTER -> Starter, PRO -> Professional, ENT -> Enterprise.
+    2. Compute tier-level averages from the product catalog grouped by PRODUCT_TIER: average LIST_PRICE_USD, average UPSELL_RATE_PCT, average AVERAGE_CONTRACT_LENGTH_MONTHS.
+    3. Join on tier.
+   Return: company name, industry, company size, churn risk score, expansion potential, first purchase date, total spend to date (sum of deal size USD; 0 if no transactions), current tier (tier of the customer's most recent transaction; null if no transactions), current tier average list price, next tier average list price (Starter -> Professional -> Enterprise; null if already Enterprise), current tier average upsell rate pct, and current tier average contract length in months."
 
-   Generate a single report titled "Customer Expansion Opportunities - [Current Month Year]" with:
-   1. Executive Summary (3 lines max): total expansion revenue potential, number of qualified customers, number of "Act Now" accounts
-   2. Full opportunity table ranked by revenue potential descending, columns:
-      Company Name | Industry | Company Size | Current Spend | Expansion Type | Revenue Potential | Renewal Timing | Priority
-   3. Format all currency as $X,XXX. Mark "Act Now" rows in bold.
-   Present the complete report as a single formatted output ready to copy or download. Do not ask follow-up questions.
+   CALCULATIONS (do these in the Flow, on the returned rows):
+   - Customers with no transactions (current tier is null): Expansion Type = "New Land (no purchase history)", Revenue Potential = 0, Renewal Timing = "N/A", Priority = "Nurture". Keep them in the table, ranked at the bottom.
+   - Customers already on Enterprise: Expansion Type = "Retain / Cross-sell", Revenue Potential = 0.
+   - Otherwise: Expansion Type = "Upgrade to <next tier>", Revenue Potential = (next tier avg list price - current tier avg list price) x (upsell rate pct / 100).
+   - Months since first purchase = whole months between first purchase date and today.
+   - Months until renewal = contract length - (months since first purchase MOD contract length). Days until renewal = months x 30.
+   - Priority: "Act Now" if <= 90 days, "Prepare" if 91-180 days, "Nurture" if > 180 days.
+
+   REPORT: title "Customer Expansion Opportunities — [Current Month Year]"
+   1. Executive Summary (3 lines max): total expansion revenue potential, number of qualified customers (and how many lack purchase history), number of "Act Now" accounts.
+   2. Full opportunity table with ALL qualified customers, ranked by Revenue Potential descending. Columns: Company Name | Industry | Company Size | Current Spend | Expansion Type | Revenue Potential | Renewal Timing | Priority
+   3. Add one footnote line: "Product tier derived from transaction SKU prefix; pricing uses tier-level catalog averages."
+   4. Format all currency as $X,XXX. Mark "Act Now" rows in bold.
+
+   Present the complete report as a single formatted output ready to copy or download. Do not ask follow-up questions. Do not split into multiple messages.
    ```
 
    > 💡 日本語のレポートにしたい場合は、最後に `Write the report in Japanese.` を追加してください。
