@@ -1,8 +1,9 @@
 -- ============================================================================
--- Amazon Quick × Snowflake ハンズオン  事前セットアップ（00_setup.sql）
---   - ウェアハウス / DB / スキーマ / ロールの作成
+-- Amazon Quick × Snowflake ハンズオン  データ準備（setup.sql）
+--   - ウェアハウス / DB / スキーマ / ロールの作成と権限設定
 --   - 営業オペレーションのサンプルデータ（6テーブル）を公開S3から読み込み
---   実行方法: Snowsight の SQL ワークシートに貼り付けて「すべて実行」
+--   - Cortex Search 用の PDF レポート（2本）を公開S3から社内ステージにコピー
+--   実行方法: load.sql の後に、Snowsight の SQL ワークシートに貼り付けて「すべて実行」
 --   所要時間: 約3分
 -- ============================================================================
 
@@ -29,6 +30,10 @@ GRANT USAGE ON WAREHOUSE CORTEX_QUICK_HOL_WH TO ROLE CORTEX_QUICK_HOL_ROLE;
 GRANT USAGE ON DATABASE  CORTEX_QUICK_HOL_DB TO ROLE CORTEX_QUICK_HOL_ROLE;
 GRANT ALL PRIVILEGES ON SCHEMA CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA TO ROLE CORTEX_QUICK_HOL_ROLE;
 GRANT SELECT ON FUTURE TABLES IN SCHEMA CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA TO ROLE CORTEX_QUICK_HOL_ROLE;
+GRANT SELECT ON FUTURE VIEWS  IN SCHEMA CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA TO ROLE CORTEX_QUICK_HOL_ROLE;
+-- Cortex Agent / Cortex Search などの AI 機能を使うためのデータベースロール
+GRANT DATABASE ROLE SNOWFLAKE.CORTEX_USER       TO ROLE CORTEX_QUICK_HOL_ROLE;
+GRANT DATABASE ROLE SNOWFLAKE.CORTEX_AGENT_USER TO ROLE CORTEX_QUICK_HOL_ROLE;
 
 USE WAREHOUSE CORTEX_QUICK_HOL_WH;
 USE SCHEMA CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA;
@@ -196,11 +201,24 @@ GROUP BY 1, 2, 3;
 
 GRANT SELECT ON VIEW PRODUCT_PLAN_VIEW TO ROLE CORTEX_QUICK_HOL_ROLE;
 
+-- ----------------------------------------------------------------------------
+-- 4-3. Cortex Search 用の PDF レポート（非構造化データ）
+--   公開 S3 の PDF 2本を、AI_PARSE_DOCUMENT で読める社内ステージ（SSE 暗号化・ディレクトリ有効）にコピー
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE STAGE HOL_S3_PDF_STAGE
+  URL = 's3://snowflake-corp-se-workshop/summit26-coco-mcp-aws-quick-hol/pdfs/';
+CREATE STAGE IF NOT EXISTS DOCS_STAGE
+  ENCRYPTION = (TYPE = 'SNOWFLAKE_SSE')
+  DIRECTORY  = (ENABLE = TRUE);
+COPY FILES INTO @DOCS_STAGE FROM @HOL_S3_PDF_STAGE;
+ALTER STAGE DOCS_STAGE REFRESH;
+GRANT READ ON STAGE DOCS_STAGE TO ROLE CORTEX_QUICK_HOL_ROLE;
+
 -- Agent が使うモデルがアカウントのリージョンにない場合に備えてクロスリージョン推論を許可
 ALTER ACCOUNT SET CORTEX_ENABLED_CROSS_REGION = 'ANY_REGION';
 
 -- ----------------------------------------------------------------------------
--- 5. 件数確認（6行すべて 0 より大きければOK）
+-- 5. 確認（テーブルは各200件、プラン結合200件、PDF 2件ならOK）
 -- ----------------------------------------------------------------------------
 SELECT 'SALES_TRANSACTIONS_FACT_TABLE' AS TABLE_NAME, COUNT(*) AS ROW_COUNT FROM SALES_TRANSACTIONS_FACT_TABLE
 UNION ALL SELECT 'CUSTOMER_DIMENSION_TABLE',     COUNT(*) FROM CUSTOMER_DIMENSION_TABLE
@@ -209,4 +227,5 @@ UNION ALL SELECT 'SALES_REP_PERFORMANCE_TABLE',  COUNT(*) FROM SALES_REP_PERFORM
 UNION ALL SELECT 'SALES_PIPELINE_OPPORTUNITIES', COUNT(*) FROM SALES_PIPELINE_OPPORTUNITIES
 UNION ALL SELECT 'MARKETING_ATTRIBUTION_TABLE',  COUNT(*) FROM MARKETING_ATTRIBUTION_TABLE
 UNION ALL SELECT 'TXN_JOINED_TO_PRODUCT_PLAN (=200)', COUNT(*)
-  FROM SALES_TRANSACTIONS_FACT_TABLE t JOIN PRODUCT_PLAN_VIEW p ON t.PRODUCT_SKU = p.PRODUCT_SKU;
+  FROM SALES_TRANSACTIONS_FACT_TABLE t JOIN PRODUCT_PLAN_VIEW p ON t.PRODUCT_SKU = p.PRODUCT_SKU
+UNION ALL SELECT 'PDF_FILES_ON_DOCS_STAGE (=2)', COUNT(*) FROM DIRECTORY(@DOCS_STAGE);

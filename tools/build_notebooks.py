@@ -1,4 +1,4 @@
-"""Generate the 3 HOL notebooks. Semantic view YAML comes from semantic_view_source.sql (verified original) and is patched below."""
+"""Generate the 5 HOL notebooks. Semantic view YAML comes from semantic_view_source.sql (verified original) and is patched below."""
 import json, uuid, pathlib
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -82,6 +82,102 @@ SV_CELL = SV_CELL.replace("CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.PRODUCT_C
 assert "right_table: PRODUCT_PLANS" in SV_CELL and "PRODUCT_PLAN_VIEW pr" in SV_CELL
 
 
+# --- v2 の精度向上：社内 KPI（業務上の定義）を Semantic View に持たせる。
+#     PDF レポートに書かれている基準（停滞＝40日超、推奨カバレッジ 1.6 倍 など）を指標として定義し、
+#     Agent が毎回同じ定義で数えるようにする。
+_OPEN = "CURRENT_STAGE NOT IN ('Closed Won', 'Closed Lost')"
+_PIPE_METRICS = f"""      - name: OPEN_PIPELINE_VALUE
+        synonyms: [open pipeline, active pipeline value, 進行中パイプライン, オープン商談金額]
+        description: Total estimated value of open opportunities (excluding Closed Won / Closed Lost)
+        expr: SUM(IFF({_OPEN}, ESTIMATED_VALUE, 0))
+      - name: STALLED_DEAL_COUNT
+        synonyms: [stalled deals, stuck deals, 停滞商談, 停滞している商談, 滞留商談]
+        description: >
+          Company definition of a stalled deal: an open opportunity that has been in its current stage
+          for more than 40 days. 社内定義：未クローズで現ステージ滞留が40日超の商談。
+        expr: COUNT_IF(DAYS_IN_CURRENT_STAGE > 40 AND {_OPEN})
+      - name: AT_RISK_DEAL_COUNT
+        synonyms: [at-risk deals, deals at risk, 失注リスク商談, リスク商談]
+        description: >
+          Company definition of an at-risk deal: an open opportunity with a competitor present and
+          no decision maker engaged. 社内定義：未クローズ・競合あり・決裁者未接触の商談。
+        expr: COUNT_IF(COMPETITOR_PRESENT AND NOT DECISION_MAKER_ENGAGED AND {_OPEN})
+      - name: AT_RISK_PIPELINE_VALUE
+        synonyms: [at-risk pipeline, 失注リスク金額, リスク商談の金額]
+        description: Total estimated value of at-risk deals (open, competitor present, no decision maker engaged)
+        expr: SUM(IFF(COMPETITOR_PRESENT AND NOT DECISION_MAKER_ENGAGED AND {_OPEN}, ESTIMATED_VALUE, 0))
+      - name: WIN_RATE_PCT
+        synonyms: [win rate, close rate, 勝率, 受注率]
+        description: >
+          Company definition of win rate: Closed Won / (Closed Won + Closed Lost) x 100, using pipeline stages.
+          社内定義：受注 ÷（受注＋失注）× 100。
+        expr: COUNT_IF(CURRENT_STAGE = 'Closed Won') * 100.0 / NULLIF(COUNT_IF(CURRENT_STAGE IN ('Closed Won', 'Closed Lost')), 0)
+"""
+_REP_METRICS = """      - name: REPS_ABOVE_QUOTA
+        synonyms: [reps over quota, reps hitting quota, 目標達成者数, 目標を達成した営業担当の数]
+        description: Number of sales reps whose quota attainment is above 100 percent
+        expr: COUNT_IF(QUOTA_ATTAINMENT_PCT > 100)
+      - name: REPS_BELOW_COVERAGE_TARGET
+        synonyms: [coverage gap reps, カバレッジ不足の営業担当, 推奨カバレッジ未満]
+        description: >
+          Number of reps below the recommended minimum pipeline coverage of 1.6x
+          (company target from the Sales Performance Analysis report). 推奨カバレッジ1.6倍未満の営業担当数。
+        expr: COUNT_IF(PIPELINE_COVERAGE_RATIO < 1.6)
+"""
+_CUST_METRICS = """      - name: EXPANSION_TARGET_CUSTOMERS
+        synonyms: [expansion targets, upsell targets, 拡大対象顧客, アップセル対象]
+        description: >
+          Customers with low churn risk (score below 30 on the 0-100 scale) and High or Medium expansion potential.
+          解約リスク30未満かつ拡大余地 High/Medium の顧客数。
+        expr: COUNT_IF(CHURN_RISK_SCORE < 30 AND EXPANSION_POTENTIAL IN ('High', 'Medium'))
+"""
+
+
+def _add_metrics(sv, after_metric_expr, block):
+    i = sv.index(after_metric_expr) + len(after_metric_expr)
+    i = sv.index("\n", i) + 1
+    return sv[:i] + block + sv[i:]
+
+
+SV_CELL = _add_metrics(SV_CELL, "expr: AVG(DAYS_IN_CURRENT_STAGE)", _PIPE_METRICS)
+SV_CELL = _add_metrics(SV_CELL, "        description: Average days in current stage\n", "")  # anchor check
+_m = SV_CELL.index("  - name: REPS")
+_r = SV_CELL.index("    metrics:", _m)
+SV_CELL = SV_CELL[:_r] + "    metrics:\n" + _REP_METRICS + SV_CELL[_r + len("    metrics:\n"):]
+_c = SV_CELL.index("  - name: CUSTOMERS")
+_cm = SV_CELL.index("    metrics:", _c)
+SV_CELL = SV_CELL[:_cm] + "    metrics:\n" + _CUST_METRICS + SV_CELL[_cm + len("    metrics:\n"):]
+SV_CELL = SV_CELL.replace("        description: Days in current stage\n",
+                          "        description: Days in current stage (more than 40 days on an open deal = stalled)\n", 1)
+SV_CELL = SV_CELL.replace("        description: Pipeline coverage ratio\n",
+                          "        description: Pipeline coverage ratio (recommended minimum 1.6x)\n", 1)
+
+_JP_VQ = """  - name: stalled_deals_jp
+    question: 停滞している商談は何件？
+    use_as_onboarding_question: true
+    sql: |
+      SELECT COUNT(*) AS STALLED_DEALS
+      FROM CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_PIPELINE_OPPORTUNITIES
+      WHERE DAYS_IN_CURRENT_STAGE > 40 AND CURRENT_STAGE NOT IN ('Closed Won', 'Closed Lost')
+  - name: win_rate_jp
+    question: 商談の勝率は？
+    use_as_onboarding_question: true
+    sql: |
+      SELECT COUNT_IF(CURRENT_STAGE = 'Closed Won') * 100.0
+             / NULLIF(COUNT_IF(CURRENT_STAGE IN ('Closed Won', 'Closed Lost')), 0) AS WIN_RATE_PCT
+      FROM CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_PIPELINE_OPPORTUNITIES
+  - name: revenue_by_tier_jp
+    question: 製品ティア別の売上を教えて
+    use_as_onboarding_question: true
+    sql: |
+      SELECT pr.PRODUCT_TIER, SUM(t.DEAL_SIZE_USD) AS TOTAL_REVENUE
+      FROM CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_TRANSACTIONS_FACT_TABLE t
+      JOIN CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.PRODUCT_PLAN_VIEW pr ON t.PRODUCT_SKU = pr.PRODUCT_SKU
+      GROUP BY pr.PRODUCT_TIER ORDER BY TOTAL_REVENUE DESC
+"""
+SV_CELL = SV_CELL.replace("verified_queries:\n", "verified_queries:\n" + _JP_VQ, 1)
+
+
 def _lines(s):
     s = s.strip("\n")
     parts = s.split("\n")
@@ -127,356 +223,530 @@ print("ロール:", session.get_current_role(), "/ ウェアハウス:", session
 PREFLIGHT_MD = '### 事前チェック：AI 機能とクロスリージョン推論\n\n後半（Agent / Quick 連携）で詰まらないよう、**最初に** AI 機能が使えるかを確かめます。\n\n- `CORTEX_ENABLED_CROSS_REGION` は、アカウントのリージョンに必要なモデルがないときに他リージョンで推論する設定です。トライアルのリージョンによっては Agent のモデルが見つからないため、`ANY_REGION` にします（データ自体は移動しません）。\n- `AI_COMPLETE` を1回だけ呼び、トライアルの AI 制限にかかっていないかを確認します（数文字の応答なので消費はごくわずかです）。\n\n> ❌ `not available for trial accounts` / `Access denied for trial accounts` が出た場合、この先の Agent は動きません。\n> 上の「トライアルアカウントの注意」のとおりクレジットカードを登録し、このセルを再実行してください。'
 PREFLIGHT_PY = 'session.sql("ALTER ACCOUNT SET CORTEX_ENABLED_CROSS_REGION = \'ANY_REGION\'").collect()\nprint("OK: CORTEX_ENABLED_CROSS_REGION = ANY_REGION")\n\ntry:\n    r = session.sql("SELECT AI_COMPLETE(\'claude-sonnet-4-5\', \'Reply with OK only.\') AS R").collect()[0]["R"]\n    print("OK: AI 機能が使えます（応答:", str(r).strip()[:20], "）")\nexcept Exception as e:\n    msg = str(e)\n    if "trial" in msg.lower():\n        raise RuntimeError(\n            "このトライアルアカウントでは AI 機能が無効です。Admin » Billing » Payment method でクレジットカードを登録してから、"\n            "このセルを再実行してください。（イベント用 URL で作ったアカウントでは通常発生しません）") from None\n    print("⚠️ AI_COMPLETE の呼び出しに失敗しました。モデル名の問題の可能性があります（Agent の動作は 02 で確認します）:\\n", msg[:300])'
 
+
+ASK_AGENT = '''import json
+
+def ask_agent(question: str, agent: str = "SALES_OPS_AGENT", show_sql: bool = True):
+    """Agent に質問し、回答・使ったツール・生成 SQL・検索した文書を表示する"""
+    payload = json.dumps({"messages": [{"role": "user", "content": [{"type": "text", "text": question}]}]})
+    raw = session.sql("SELECT SNOWFLAKE.CORTEX.DATA_AGENT_RUN(?, ?) AS R",
+                      params=[f"{DB}.{SCHEMA}.{agent}", payload]).collect()[0]["R"]
+    resp = json.loads(raw) if isinstance(raw, str) else raw
+    texts, sqls, tools, docs = [], [], [], []
+    for c in resp.get("content", []):
+        if c.get("type") == "text" and c.get("text", "").strip():
+            texts.append(c["text"])
+        elif c.get("type") == "tool_use":
+            tools.append(c.get("tool_use", {}).get("name"))
+        elif c.get("type") == "tool_result":
+            for x in c.get("tool_result", {}).get("content", []):
+                j = x.get("json", {})
+                if j.get("sql"):
+                    sqls.append(j["sql"])
+                for r in j.get("search_results", []) or []:
+                    if r.get("doc_title"):
+                        docs.append(r["doc_title"])
+    print(f"Q: {question}")
+    print(f"（使ったツール: {', '.join(t for t in tools if t) or 'なし'}）\\n")
+    print("\\n".join(texts))
+    if show_sql:
+        for s in sqls:
+            print("\\n--- Cortex Analyst が生成した SQL ---\\n" + s)
+    if docs:
+        print("\\n--- 参照した文書 ---\\n" + "\\n".join(sorted(set(docs))))
+    return resp'''
+
+FQ = "CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA."
+
+INTRO_TABLE = '''| Notebook | 内容 |
+|---|---|
+| 01 | 取り込んだデータの確認と、このハンズオンで作るもの |
+| 02 | **Cortex Analyst**：Semantic View を作り、改善前後の正答率を比べる |
+| 03 | **Cortex Search**：PDF レポートを検索できるようにする |
+| 04 | **Cortex Agent**：Analyst と Search を組み合わせた Agent を作る |
+| 05 | MCP Server と OAuth：Amazon Quick から Agent を呼べるようにする |'''
+
 # ------------------------------------------------------------------ 01
 nb1 = [
-    md('''# 01. データ準備 ― ウェアハウス・DB・ロールと6テーブル
+    md(f'''# 01. データを確認する ― 何があって、何を作るのか
 
-Amazon Quick × Snowflake ハンズオン（Snowflake編）の **1本目** です。
-元教材では SQL ワークシートに貼り付けて一括実行していた部分を、1ステップずつ実行しながら確認します。
+Amazon Quick × Snowflake ハンズオン（Snowflake 編）の 1 本目です。
+`setup.sql` で取り込んだデータを確認し、このハンズオンで作るものを整理します。**このNotebookでは何も作りません**（確認だけです）。
 
-| Notebook | 内容 |
-|---|---|
-| **01（このNotebook）** | ウェアハウス・DB・ロールの作成、S3 から 6 テーブルをロード |
-| 02 | Semantic View と Cortex Agent の作成・動作確認 |
-| 03 | MCP Server と OAuth の作成、Amazon Quick に入力する値の取得 |
+{INTRO_TABLE}
 
-**前提**：Snowflake の **トライアルアカウント**（Enterprise エディション、**AWS** リージョン推奨）。サインアップしたユーザーは ACCOUNTADMIN を持っています。  
+**前提**：`load.sql` と `setup.sql` を実行済みであること  
 **所要時間**：約10分
 
 ### Notebook を開く前に（トライアルアカウントの注意）
 
 | 確認すること | 理由 |
 |---|---|
-| **AI 機能が有効なトライアルか** | 通常のセルフサービストライアルでは Cortex Agent などの AI 機能が**既定で無効**です（`not available for trial accounts`）。イベント用のサインアップ URL で作ったアカウントか、**Admin » Billing でクレジットカードを登録**したアカウントを使ってください（カード登録後も残りの無償クレジットはそのまま使えます）。Step 0 で自動チェックします。 |
-| **コンピュートプールは `SYSTEM_COMPUTE_POOL_CPU`** | トライアルではコンピュートプールを新規作成できません。Notebook の接続時に既定の CPU プールを選んでください（GPU は不要です）。 |
-| **クエリウェアハウスは既定の `COMPUTE_WH` でよい** | Step 1 で専用ウェアハウスを作り、以降はそちらに切り替えます。 |'''),
-    fig("全体アーキテクチャ", "6テーブル → Semantic View → Cortex Agent → MCP Server → OAuth → Amazon Quick の全体図（このNotebookは左端の「データ」部分）"),
-    md('''## Step 0. セッションの準備
+| **AI 機能が有効なトライアルか** | 通常のセルフサービストライアルでは Cortex の AI 機能が**既定で無効**です（`not available for trial accounts`）。イベント用のサインアップ URL で作ったアカウントか、**Admin » Billing でクレジットカードを登録**したアカウントを使ってください（カード登録後も残りの無償クレジットはそのまま使えます）。Step 0 で自動チェックします。 |
+| **コンピュートプールは `SYSTEM_COMPUTE_POOL_CPU`** | トライアルではコンピュートプールを新規作成できません。Notebook の接続時に既定の CPU プールを選んでください。 |'''),
+    md('''## シナリオ
 
-このNotebookで使う名前（DB・スキーマ・ロール・ウェアハウス）を変数にまとめます。
-作成系の操作は ACCOUNTADMIN で行い、最後にハンズオン用ロールで参照できることを確認します。
+あなたは SaaS 企業の**営業企画（Sales Operations）の担当者**です。
+営業部長や現場のマネージャーから、毎日のようにこんな質問が届きます。
 
-> ウェアハウス `CORTEX_QUICK_HOL_WH` はまだ存在しないため、このセルは Step 1 の後でもう一度実行しても構いません。'''),
-    py('''from snowflake.snowpark.context import get_active_session
-session = get_active_session()
+- 「今期の地域別の売上は？ Enterprise プランはどれくらい売れている？」
+- 「**停滞している商談**は何件ある？」「**勝率**は？」
+- 「レポートで推奨されている**パイプラインカバレッジ**を下回っている営業担当は誰？」
 
-DB, SCHEMA = "CORTEX_QUICK_HOL_DB", "CORTEX_QUICK_HOL_SCHEMA"
-HOL_ROLE, HOL_WH = "CORTEX_QUICK_HOL_ROLE", "CORTEX_QUICK_HOL_WH"
+数字は Snowflake のテーブルに、**社内の基準や推奨アクションは PDF のレポート**に書かれています。
+このハンズオンでは、両方をまたいで自然言語で答える **Cortex Agent** を作り、最後に **Amazon Quick** から使えるようにします。'''),
+    fig("全体アーキテクチャ", "6テーブル → Semantic View → Cortex Analyst ／ PDF → Cortex Search → Cortex Agent → MCP Server → OAuth → Amazon Quick"),
+    md('''## Step 0. セッションの準備と事前チェック
 
-session.use_role("ACCOUNTADMIN")
+このハンズオンで使う名前を変数にまとめ、AI 機能が使えるかを最初に確かめます。'''),
+    py(SETUP + '''
 info = session.sql("""SELECT CURRENT_USER() AS U, CURRENT_REGION() AS R,
   CURRENT_ORGANIZATION_NAME() || '-' || CURRENT_ACCOUNT_NAME() AS A""").collect()[0]
-hol_user = info["U"]
-print("実行ユーザー:", hol_user, "/ ロール:", session.get_current_role())
-print("アカウント  :", info["A"], "/ リージョン:", info["R"])'''),
+print("実行ユーザー:", info["U"], "/ アカウント:", info["A"], "/ リージョン:", info["R"])'''),
     md(PREFLIGHT_MD),
     py(PREFLIGHT_PY),
-    md('''## Step 1. ウェアハウス・データベース・スキーマ・ロールを作る
+    md('''## Step 1. 構造化データ：6 つのテーブル
 
-| オブジェクト | 名前 | 役割 |
-|---|---|---|
-| ウェアハウス | `CORTEX_QUICK_HOL_WH` | SQL を実行する計算資源（XSMALL、60秒で自動停止） |
-| データベース / スキーマ | `CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA` | テーブルや Agent の置き場所 |
-| ロール | `CORTEX_QUICK_HOL_ROLE` | Amazon Quick から接続するときに使う権限のまとまり |
-
-> 💡 **元教材との違い**：元教材では `SNOWFLAKE_USER` を自分のユーザー名に書き換えて実行します。
-> ここでは `CURRENT_USER()` で取得した値を使うので、書き換えは不要です。'''),
-    py('''stmts = [
-    f"CREATE WAREHOUSE IF NOT EXISTS {HOL_WH} WAREHOUSE_SIZE='XSMALL' AUTO_SUSPEND=60 AUTO_RESUME=TRUE INITIALLY_SUSPENDED=TRUE",
-    f"CREATE DATABASE IF NOT EXISTS {DB}",
-    f"CREATE SCHEMA IF NOT EXISTS {DB}.{SCHEMA}",
-    f"CREATE ROLE IF NOT EXISTS {HOL_ROLE}",
-    f'GRANT ROLE {HOL_ROLE} TO USER "{hol_user}"',
-]
-for s in stmts:
-    session.sql(s).collect()
-    print("OK:", s)
-
-session.use_warehouse(HOL_WH)
-session.use_schema(f"{DB}.{SCHEMA}")'''),
-    md('''### ロールに権限を付ける
-
-Snowflake では「誰が何をできるか」をロールに付けた権限で管理します（RBAC）。
-Quick から OAuth でログインしたユーザーも、このロールの権限の範囲でしかデータに触れません。
-
-| 権限 | 意味 |
-|---|---|
-| `USAGE ON WAREHOUSE` | ウェアハウスで SQL を実行できる |
-| `USAGE ON DATABASE` | データベースの中を見られる |
-| `ALL ON SCHEMA` | スキーマ内にオブジェクトを作ったり使ったりできる |
-| `SELECT ON FUTURE TABLES` | **これから作る**テーブルを自動的に参照できる |
-| `SNOWFLAKE.CORTEX_AGENT_USER` | Cortex Agent を呼び出せる（データベースロール） |'''),
-    py('''stmts = [
-    f"GRANT USAGE ON WAREHOUSE {HOL_WH} TO ROLE {HOL_ROLE}",
-    f"GRANT USAGE ON DATABASE {DB} TO ROLE {HOL_ROLE}",
-    f"GRANT ALL PRIVILEGES ON SCHEMA {DB}.{SCHEMA} TO ROLE {HOL_ROLE}",
-    f"GRANT SELECT ON FUTURE TABLES IN SCHEMA {DB}.{SCHEMA} TO ROLE {HOL_ROLE}",
-    f"GRANT DATABASE ROLE SNOWFLAKE.CORTEX_AGENT_USER TO ROLE {HOL_ROLE}",
-]
-for s in stmts:
-    session.sql(s).collect()
-    print("OK:", s)'''),
-    md('''## Step 2. CSV のファイルフォーマットを作る
-
-S3 にある CSV ファイルの読み方（区切り文字・ヘッダー行・NULL の扱い）を定義します。'''),
-    sql("create_file_format", '''CREATE OR REPLACE FILE FORMAT CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.CSV_FORMAT
-  TYPE = 'CSV'
-  FIELD_OPTIONALLY_ENCLOSED_BY = '"'
-  SKIP_HEADER = 1
-  NULL_IF = ('', 'NULL')'''),
-    md('''## Step 3. 6つのテーブルを作る
-
-営業オペレーションのサンプルデータです。取引（ファクト）を中心に、顧客・製品・営業担当が紐づきます。
+`setup.sql` で公開 S3 から読み込んだ、営業オペレーションのサンプルデータです。まず件数を確認します（各 200 件）。
 
 | テーブル | 内容 | 主なカラム |
 |---|---|---|
-| `SALES_TRANSACTIONS_FACT_TABLE` | 受注した取引（ファクト） | 地域、金額、割引率、営業期間 |
-| `CUSTOMER_DIMENSION_TABLE` | 顧客 | 業種、規模、LTV、解約リスク |
-| `PRODUCT_CATALOG_TABLE` | 製品カタログ | カテゴリ、ティア、定価、更新率 |
-| `SALES_REP_PERFORMANCE_TABLE` | 営業担当の実績 | テリトリー、目標、達成率、勝率 |
-| `SALES_PIPELINE_OPPORTUNITIES` | 商談パイプライン | ステージ、見込み金額、競合有無 |
-| `MARKETING_ATTRIBUTION_TABLE` | マーケティング施策 | キャンペーン、チャネル、リードスコア |'''),
-    fig("テーブル関係図（ER図）", "取引テーブルが CUSTOMER_ID / PRODUCT_SKU / SALES_REP_ID で顧客・製品・営業担当につながる図。パイプラインとマーケティングは独立"),
-    sql("create_tables", '''CREATE OR REPLACE TABLE CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_TRANSACTIONS_FACT_TABLE (
-  TRANSACTION_ID VARCHAR, TRANSACTION_DATE DATE, CUSTOMER_ID VARCHAR, PRODUCT_SKU VARCHAR,
-  SALES_REP_ID VARCHAR, REGION VARCHAR, DEAL_SIZE_USD NUMBER(12,2), QUANTITY NUMBER,
-  DISCOUNT_PERCENTAGE NUMBER(5,2), SALES_CYCLE_DAYS NUMBER, LEAD_SOURCE VARCHAR,
-  CLOSE_PROBABILITY_AT_START NUMBER(5,2), FORECAST_CLOSE_DATE DATE, ACTUAL_CLOSE_DATE DATE
-);
-CREATE OR REPLACE TABLE CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.CUSTOMER_DIMENSION_TABLE (
-  CUSTOMER_ID VARCHAR, COMPANY_NAME VARCHAR, INDUSTRY VARCHAR, COMPANY_SIZE VARCHAR,
-  ANNUAL_REVENUE_BAND VARCHAR, FIRST_PURCHASE_DATE DATE, CUSTOMER_LIFETIME_VALUE NUMBER(12,2),
-  CHURN_RISK_SCORE NUMBER(5,2), TOTAL_CONTRACTS_COUNT NUMBER, EXPANSION_POTENTIAL VARCHAR
-);
-CREATE OR REPLACE TABLE CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.PRODUCT_CATALOG_TABLE (
-  PRODUCT_SKU VARCHAR, PRODUCT_NAME VARCHAR, PRODUCT_CATEGORY VARCHAR, PRODUCT_FEATURE VARCHAR,
-  PRODUCT_TIER VARCHAR, BILLING_FREQUENCY VARCHAR, LIST_PRICE_USD NUMBER(12,2),
-  AVERAGE_CONTRACT_LENGTH_MONTHS NUMBER, RENEWAL_RATE_PCT NUMBER(5,2), UPSELL_RATE_PCT NUMBER(5,2),
-  TYPICAL_DISCOUNT_RANGE VARCHAR
-);
-CREATE OR REPLACE TABLE CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_REP_PERFORMANCE_TABLE (
-  SALES_REP_ID VARCHAR, REP_NAME VARCHAR, TERRITORY VARCHAR, HIRE_DATE DATE, QUOTA_USD NUMBER(12,2),
-  QUOTA_ATTAINMENT_PCT NUMBER(5,2), AVG_DEAL_SIZE NUMBER(12,2), WIN_RATE_PCT NUMBER(5,2),
-  AVG_SALES_CYCLE_DAYS NUMBER(5,2), PIPELINE_COVERAGE_RATIO NUMBER(5,2), ACTIVE_OPPORTUNITIES_COUNT NUMBER
-);
-CREATE OR REPLACE TABLE CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_PIPELINE_OPPORTUNITIES (
-  OPPORTUNITY_ID VARCHAR, OPPORTUNITY_NAME VARCHAR, CURRENT_STAGE VARCHAR, ESTIMATED_VALUE NUMBER(12,2),
-  WEIGHTED_FORECAST_VALUE NUMBER(12,2), CLOSE_PROBABILITY NUMBER(5,2), CREATED_DATE DATE,
-  EXPECTED_CLOSE_DATE DATE, STAGE_ENTRY_DATE DATE, LAST_ACTIVITY_DATE DATE, DAYS_IN_CURRENT_STAGE NUMBER,
-  COMPETITOR_PRESENT BOOLEAN, DECISION_MAKER_ENGAGED BOOLEAN, ACTIVITY_COUNT_LAST_30_DAYS NUMBER
-);
-CREATE OR REPLACE TABLE CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.MARKETING_ATTRIBUTION_TABLE (
-  LEAD_ID VARCHAR, LEAD_SOURCE_DETAIL VARCHAR, CAMPAIGN_NAME VARCHAR, FIRST_TOUCH_CHANNEL VARCHAR,
-  LAST_TOUCH_CHANNEL VARCHAR, LEAD_SCORE NUMBER(5,2), LEAD_TO_OPPORTUNITY_DAYS NUMBER,
-  MARKETING_SPEND_ALLOCATED NUMBER(12,2)
-)'''),
-    md('''## Step 4. S3 からデータをロードする
+| `SALES_TRANSACTIONS_FACT_TABLE` | 受注した取引（ファクト） | 地域、金額、割引率、プラン SKU |
+| `CUSTOMER_DIMENSION_TABLE` | 顧客 | 業種、規模、LTV、解約リスク（0〜100）、拡大余地 |
+| `PRODUCT_CATALOG_TABLE` | 製品カタログ | カテゴリ、ティア、定価、更新率、アップセル率 |
+| `SALES_REP_PERFORMANCE_TABLE` | 営業担当の実績 | テリトリー、目標達成率、勝率、パイプラインカバレッジ |
+| `SALES_PIPELINE_OPPORTUNITIES` | 商談パイプライン | ステージ、見込金額、滞留日数、競合有無、決裁者接触 |
+| `MARKETING_ATTRIBUTION_TABLE` | マーケティング施策 | キャンペーン、チャネル、リードスコア、費用 |'''),
+    sql("row_counts", f'''SELECT 'SALES_TRANSACTIONS_FACT_TABLE' AS TABLE_NAME, COUNT(*) AS ROW_COUNT FROM {FQ}SALES_TRANSACTIONS_FACT_TABLE
+UNION ALL SELECT 'CUSTOMER_DIMENSION_TABLE',     COUNT(*) FROM {FQ}CUSTOMER_DIMENSION_TABLE
+UNION ALL SELECT 'PRODUCT_CATALOG_TABLE',        COUNT(*) FROM {FQ}PRODUCT_CATALOG_TABLE
+UNION ALL SELECT 'SALES_REP_PERFORMANCE_TABLE',  COUNT(*) FROM {FQ}SALES_REP_PERFORMANCE_TABLE
+UNION ALL SELECT 'SALES_PIPELINE_OPPORTUNITIES', COUNT(*) FROM {FQ}SALES_PIPELINE_OPPORTUNITIES
+UNION ALL SELECT 'MARKETING_ATTRIBUTION_TABLE',  COUNT(*) FROM {FQ}MARKETING_ATTRIBUTION_TABLE'''),
+    fig("テーブル関係図（ER図）", "取引が CUSTOMER_ID / PRODUCT_SKU / SALES_REP_ID で顧客・製品・営業担当につながる。パイプラインとマーケティングは独立"),
+    md('''### 中身を見てみる
 
-`COPY INTO` で、公開 S3 バケットの CSV を各テーブルに読み込みます。認証情報は不要です（トライアルアカウントでもそのまま動きます）。
-結果の `status` が `LOADED`、`rows_loaded` が 200 になっていれば成功です。
+取引と商談を数行ずつ表示します。どんなカラムにどんな値が入っているかを眺めてください。'''),
+    sql("sample_transactions", f'''SELECT * FROM {FQ}SALES_TRANSACTIONS_FACT_TABLE ORDER BY TRANSACTION_DATE LIMIT 5'''),
+    sql("sample_pipeline", f'''SELECT OPPORTUNITY_NAME, CURRENT_STAGE, ESTIMATED_VALUE, DAYS_IN_CURRENT_STAGE,
+       COMPETITOR_PRESENT, DECISION_MAKER_ENGAGED
+FROM {FQ}SALES_PIPELINE_OPPORTUNITIES ORDER BY ESTIMATED_VALUE DESC LIMIT 5'''),
+    md('''### ざっくり集計してみる
 
-> 💡 同じセルを2回実行すると `LOAD_SKIPPED`（読み込み済み）になります。テーブルを作り直した（Step 3 を再実行した）場合は再度 `LOADED` になります。'''),
-    py('''S3 = "s3://snowflake-corp-se-workshop/summit26-coco-mcp-aws-quick-hol/csvs"
-tables = ["SALES_TRANSACTIONS_FACT_TABLE", "CUSTOMER_DIMENSION_TABLE", "PRODUCT_CATALOG_TABLE",
-          "SALES_REP_PERFORMANCE_TABLE", "SALES_PIPELINE_OPPORTUNITIES", "MARKETING_ATTRIBUTION_TABLE"]
-for t in tables:
-    r = session.sql(f"COPY INTO {DB}.{SCHEMA}.{t} FROM '{S3}/{t.lower()}.csv' FILE_FORMAT = {DB}.{SCHEMA}.CSV_FORMAT").collect()[0]
-    print(f"{t:<32} {r['status']:<8} rows_loaded={r['rows_loaded']}")
-    assert r["status"] in ("LOADED", "LOAD_SKIPPED"), f"{t} のロードに失敗しました: {r}"'''),
-    md('''### 既存テーブルにも SELECT 権限を付ける
+あとで Agent に聞く質問の「正解」を、SQL で先に確かめておきます。'''),
+    sql("revenue_by_region", f'''SELECT REGION, COUNT(*) AS DEALS, SUM(DEAL_SIZE_USD) AS REVENUE
+FROM {FQ}SALES_TRANSACTIONS_FACT_TABLE GROUP BY REGION ORDER BY REVENUE DESC'''),
+    sql("pipeline_by_stage", f'''SELECT CURRENT_STAGE, COUNT(*) AS OPPS, SUM(ESTIMATED_VALUE) AS VALUE,
+       ROUND(AVG(DAYS_IN_CURRENT_STAGE), 1) AS AVG_DAYS_IN_STAGE
+FROM {FQ}SALES_PIPELINE_OPPORTUNITIES GROUP BY CURRENT_STAGE ORDER BY VALUE DESC'''),
+    md('''> 💡 **気づいてほしいこと**
+> - 解約リスク `CHURN_RISK_SCORE` は **0〜100** の値です（0〜1 ではありません）。
+> - 「停滞商談」「勝率」「推奨カバレッジ」といった**社内用語は、どのテーブルにもカラムとして存在しません**。
+>   人間は「あの基準のことだな」と分かりますが、AI は分かりません。これを教えるのが 02 の Semantic View です。'''),
+    md(f'''## Step 2. データの落とし穴：取引と製品がつながらない
 
-Step 1 の `FUTURE TABLES` の付与は、**付与した後に作ったテーブル**に効きます。
-念のため、作成済みのテーブルにも明示的に付与します。
+取引の `PRODUCT_SKU` と製品カタログの `PRODUCT_SKU` で結合してみます。'''),
+    sql("join_check", f'''SELECT
+  (SELECT COUNT(*) FROM {FQ}SALES_TRANSACTIONS_FACT_TABLE t JOIN {FQ}CUSTOMER_DIMENSION_TABLE c ON t.CUSTOMER_ID = c.CUSTOMER_ID)     AS TXN_TO_CUSTOMER,
+  (SELECT COUNT(*) FROM {FQ}SALES_TRANSACTIONS_FACT_TABLE t JOIN {FQ}SALES_REP_PERFORMANCE_TABLE r ON t.SALES_REP_ID = r.SALES_REP_ID) AS TXN_TO_REP,
+  (SELECT COUNT(*) FROM {FQ}SALES_TRANSACTIONS_FACT_TABLE t JOIN {FQ}PRODUCT_CATALOG_TABLE p ON t.PRODUCT_SKU = p.PRODUCT_SKU)        AS TXN_TO_PRODUCT_CATALOG,
+  (SELECT COUNT(*) FROM {FQ}SALES_TRANSACTIONS_FACT_TABLE t JOIN {FQ}PRODUCT_PLAN_VIEW p ON t.PRODUCT_SKU = p.PRODUCT_SKU)            AS TXN_TO_PRODUCT_PLAN'''),
+    md('''顧客・営業担当は 200 件すべて結合できますが、**製品カタログとは 0 件**です。
+取引の SKU は `ENT-ANNUAL` のような「ティア＋請求サイクル」（6種類）、カタログは `ENT-ANN-011` のような個別製品（200種類）で、形式が違うためです（元教材のデータのままです）。
 
-> 💡 **元教材との違い**：元教材ではテーブル作成前に `GRANT SELECT ON ALL TABLES` を実行しているため、
-> その時点で存在しないテーブルには権限が付きません。ここではロード後に付与しています。'''),
-    py('''session.sql(f"GRANT SELECT ON ALL TABLES IN SCHEMA {DB}.{SCHEMA} TO ROLE {HOL_ROLE}").collect()
-print("OK: 既存テーブルへの SELECT を付与しました")'''),
-    md('''## Step 5. 確認する
+そこで `setup.sql` では、**プラン（ティア×請求サイクル）単位のビュー `PRODUCT_PLAN_VIEW`** を作っています。これなら 200 件すべて結合できます（`TXN_TO_PRODUCT_PLAN = 200`）。
+このように「AI に渡す前にデータのつながりを確かめる」ことが、精度の土台になります。'''),
+    sql("product_plan_view", f'''SELECT * FROM {FQ}PRODUCT_PLAN_VIEW ORDER BY PRODUCT_SKU'''),
+    md('''## Step 3. 非構造化データ：PDF レポート 2 本
 
-6テーブルすべてに **200件** ずつ入っていれば準備完了です。'''),
-    sql("row_counts", '''SELECT 'SALES_TRANSACTIONS_FACT_TABLE' AS TABLE_NAME, COUNT(*) AS ROW_COUNT FROM CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_TRANSACTIONS_FACT_TABLE
-UNION ALL SELECT 'CUSTOMER_DIMENSION_TABLE',     COUNT(*) FROM CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.CUSTOMER_DIMENSION_TABLE
-UNION ALL SELECT 'PRODUCT_CATALOG_TABLE',        COUNT(*) FROM CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.PRODUCT_CATALOG_TABLE
-UNION ALL SELECT 'SALES_REP_PERFORMANCE_TABLE',  COUNT(*) FROM CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_REP_PERFORMANCE_TABLE
-UNION ALL SELECT 'SALES_PIPELINE_OPPORTUNITIES', COUNT(*) FROM CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_PIPELINE_OPPORTUNITIES
-UNION ALL SELECT 'MARKETING_ATTRIBUTION_TABLE',  COUNT(*) FROM CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.MARKETING_ATTRIBUTION_TABLE'''),
-    md('''### テーブル同士がつながるか確認する
+数字以外の「社内の基準」や「推奨アクション」は、PDF のレポートに書かれています。`setup.sql` で社内ステージ `DOCS_STAGE` にコピー済みです。
 
-Semantic View では、取引テーブルを顧客・製品・営業担当とキーで結合します。実際に一致する行数を見ておきます。'''),
-    sql("join_check", '''SELECT
-  (SELECT COUNT(*) FROM CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_TRANSACTIONS_FACT_TABLE t JOIN CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.CUSTOMER_DIMENSION_TABLE c ON t.CUSTOMER_ID = c.CUSTOMER_ID)     AS TXN_TO_CUSTOMER,
-  (SELECT COUNT(*) FROM CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_TRANSACTIONS_FACT_TABLE t JOIN CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_REP_PERFORMANCE_TABLE r ON t.SALES_REP_ID = r.SALES_REP_ID) AS TXN_TO_REP,
-  (SELECT COUNT(*) FROM CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_TRANSACTIONS_FACT_TABLE t JOIN CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.PRODUCT_CATALOG_TABLE p ON t.PRODUCT_SKU = p.PRODUCT_SKU)        AS TXN_TO_PRODUCT_CATALOG'''),
-    md('''> ⚠️ **元データの問題：取引と製品カタログが結合できない**
-> 顧客・営業担当は 200 件すべて一致しますが、**製品カタログとは 0 件**です。
-> 取引の `PRODUCT_SKU` は `ENT-ANNUAL` のような「ティア＋請求サイクル」（6種類）、製品カタログは `ENT-ANN-011` のような個別製品（200種類）で、値の形式が違うためです（元教材のデータのままです）。
-> このままだと「ティア別の売上は？」という Semantic View の検証済みクエリも 0 件になってしまいます。
-
-## Step 6. 取引と製品をつなぐ「プラン」ビューを作る
-
-取引の SKU を分解すると、ティア（`ENT` → Enterprise など）と請求サイクル（`ANNUAL` → Annual）が取り出せます。
-製品カタログにも同じ2つのカラムがあるので、**プラン（ティア×請求サイクル）単位**のビューを作れば両者をつなげられます。
-
-| ビューのカラム | 意味 |
+| PDF | 主な内容 |
 |---|---|
-| `PRODUCT_SKU` | 取引と同じ SKU（`ENT-ANNUAL` など）→ **取引と 1対多 で結合できる** |
-| `PRODUCT_TIER` / `BILLING_FREQUENCY` | Enterprise / Professional / Starter、Annual / Monthly |
-| `CATALOG_PRODUCT_COUNT` / `AVG_LIST_PRICE_USD` / `AVG_RENEWAL_RATE_PCT` / `AVG_UPSELL_RATE_PCT` / `AVG_CONTRACT_LENGTH_MONTHS` | そのプランに属するカタログ製品の数・平均定価・平均更新率・平均アップセル率・平均契約期間 |
+| Sales Performance Analysis | 地域・営業担当の分析、**推奨パイプラインカバレッジ 1.6 倍**、値引きの上限の目安 |
+| Customer Intelligence & Pipeline | 解約リスクの高い顧客、**停滞商談（40日超）**と推奨アクション、施策の優先順位 |'''),
+    sql("list_docs", f'''SELECT RELATIVE_PATH, SIZE, LAST_MODIFIED FROM DIRECTORY(@{FQ}DOCS_STAGE)'''),
+    md('''## このハンズオンで作るもの
 
-> 💡 **元教材との違い**：Semantic View の製品テーブルをこのビューに差し替えています。これで「ティア別」「請求サイクル別」の売上に答えられます。
-> 個別製品やカテゴリ単位の売上は、元データに情報がないため答えられません（製品カタログ単体の質問には答えられます）。'''),
-    fig("プランビューによる結合", "取引 PRODUCT_SKU（ENT-ANNUAL）→ PRODUCT_PLAN_VIEW（Enterprise × Annual）← 製品カタログ（ティア＋請求サイクルで集約）の図"),
-    sql("create_product_plan_view", '''CREATE OR REPLACE VIEW CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.PRODUCT_PLAN_VIEW
-  COMMENT = 'Plan (tier x billing) level product view joinable to SALES_TRANSACTIONS_FACT_TABLE.PRODUCT_SKU'
-AS
-WITH plans AS (
-  SELECT DISTINCT PRODUCT_SKU,
-    CASE SPLIT_PART(PRODUCT_SKU, '-', 1)
-      WHEN 'ENT' THEN 'Enterprise' WHEN 'PRO' THEN 'Professional' WHEN 'STARTER' THEN 'Starter'
-    END AS PRODUCT_TIER,
-    INITCAP(SPLIT_PART(PRODUCT_SKU, '-', 2)) AS BILLING_FREQUENCY
-  FROM CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_TRANSACTIONS_FACT_TABLE
-)
-SELECT p.PRODUCT_SKU, p.PRODUCT_TIER, p.BILLING_FREQUENCY,
-  COUNT(c.PRODUCT_SKU)              AS CATALOG_PRODUCT_COUNT,
-  ROUND(AVG(c.LIST_PRICE_USD), 2)   AS AVG_LIST_PRICE_USD,
-  ROUND(AVG(c.RENEWAL_RATE_PCT), 2) AS AVG_RENEWAL_RATE_PCT,
-  ROUND(AVG(c.UPSELL_RATE_PCT), 2)  AS AVG_UPSELL_RATE_PCT,
-  ROUND(AVG(c.AVERAGE_CONTRACT_LENGTH_MONTHS), 1) AS AVG_CONTRACT_LENGTH_MONTHS
-FROM plans p
-LEFT JOIN CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.PRODUCT_CATALOG_TABLE c
-  ON c.PRODUCT_TIER = p.PRODUCT_TIER AND c.BILLING_FREQUENCY = p.BILLING_FREQUENCY
-GROUP BY 1, 2, 3'''),
-    py('''session.sql(f"GRANT SELECT ON VIEW {DB}.{SCHEMA}.PRODUCT_PLAN_VIEW TO ROLE {HOL_ROLE}").collect()
-print("OK: PRODUCT_PLAN_VIEW への SELECT を付与しました")'''),
-    md('''6行（3ティア × 2請求サイクル）が表示され、`CATALOG_PRODUCT_COUNT` がすべて 1 以上なら成功です。
-取引 200 件すべてがプランに結合できることも確認します（`TXN_TO_PLAN = 200`）。'''),
-    sql("check_product_plan_view", '''SELECT v.*,
-  (SELECT COUNT(*) FROM CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_TRANSACTIONS_FACT_TABLE t
-     JOIN CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.PRODUCT_PLAN_VIEW p ON t.PRODUCT_SKU = p.PRODUCT_SKU) AS TXN_TO_PLAN
-FROM CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.PRODUCT_PLAN_VIEW v
-ORDER BY v.PRODUCT_SKU'''),
-    md('''✅ 01 はここまでです。次は `02_semantic_view_and_agent.ipynb` に進みます。'''),
+| 種類 | 名前 | 役割 | 作る Notebook |
+|---|---|---|---|
+| Semantic View（改善前） | `SALES_OPS_SV_BASIC` | テーブルを並べただけの最小構成 | 02 |
+| Semantic View（改善版） | `SALES_OPS_SEMANTIC_VIEW` | 説明・同義語・社内 KPI・検証済みクエリ入り | 02 |
+| Cortex Search Service | `SALES_DOCS_SEARCH` | PDF レポートの意味検索 | 03 |
+| Cortex Agent | `SALES_OPS_AGENT` | Analyst（数字）と Search（文書）を使い分けて答える | 04 |
+| MCP Server / OAuth | `SALES_OPS_MCP_SERVER` / `SALES_OPS_QUICK_SUITE_OAUTH` | Amazon Quick から呼ぶ窓口 | 05 |
+
+✅ 01 はここまでです。次は `02_cortex_analyst.ipynb` に進みます。'''),
 ]
 
 # ------------------------------------------------------------------ 02
 nb2 = [
-    md('''# 02. Semantic View と Cortex Agent
+    md(f'''# 02. Cortex Analyst ― Semantic View を作り、精度を上げる
 
-2本目では、テーブルに **ビジネス上の意味** を与える Semantic View と、それを使って自然言語の質問に答える Cortex Agent を作ります。
+**Cortex Analyst** は、自然言語の質問を SQL に変換して実行する機能です。
+その「辞書」になるのが **Semantic View** です。このNotebookでは、
 
-元教材では Cortex Code スキルの Step 2〜4 が自動で行っている部分です。
+1. テーブルを並べただけの **最小構成（v1）** を作り、
+2. 説明・同義語・社内 KPI・検証済みクエリを入れた **改善版（v2）** を作り、
+3. **同じ 9 問の質問で正答率を自動採点**して、改善の効果を数字で確かめます。
 
-**前提**：`01_data_setup.ipynb` を最後まで実行済みであること'''),
-    fig("Semantic View と Agent の関係", "ユーザーの質問 → Cortex Agent → Cortex Analyst（Semantic View を参照して SQL 生成）→ ウェアハウスで実行 → 回答、の流れ"),
+**前提**：`01_explore_data.ipynb` を実行済みであること  
+**所要時間**：約20分'''),
+    fig("Cortex Analyst の仕組み", "質問 → Cortex Analyst（Semantic View を参照して SQL 生成）→ ウェアハウスで実行 → 結果"),
     md("## Step 0. セッションの準備"),
     py(SETUP),
     md('''## Step 1. Semantic View とは
 
-AI にテーブルだけを渡すと、「売上」がどのカラムのどんな計算なのかを列名から**推測**します。
-推測がぶれると、同じ質問でも答えが変わったり、部門ごとに数字が合わなくなったりします。
-
-Semantic View は、その推測をなくすための「データの辞書」です。
+AI にテーブルだけを渡すと、「売上」「停滞商談」がどのカラムのどんな計算なのかを列名から**推測**します。
+推測がぶれると、同じ質問でも答えが変わったり、社内の数字と合わなくなったりします。Semantic View は、その推測をなくすための「データの辞書」です。
 
 | 要素 | 意味 | 例 |
 |---|---|---|
 | 論理テーブル | 物理テーブルに分かりやすい名前を付けたもの | `TRANSACTIONS` = `SALES_TRANSACTIONS_FACT_TABLE` |
 | ディメンション | 切り口（GROUP BY に使う項目） | 地域、業種、商談ステージ |
-| ファクト | 行ごとの数値 | 取引金額、目標額 |
-| メトリクス | 集計の定義（KPI） | 売上 = `SUM(DEAL_SIZE_USD)` |
+| ファクト | 行ごとの数値 | 取引金額、滞留日数 |
+| メトリクス | 集計の定義（**社内 KPI**） | 停滞商談数 = 未クローズかつ滞留40日超の件数 |
 | リレーション | テーブル同士のつなぎ方 | 取引 → 顧客（CUSTOMER_ID） |
-| 同義語 | 言い換え | 売上 / revenue / 総売上 |
-| 検証済みクエリ | よくある質問と正解 SQL のペア | 「地域別の売上は？」 |
+| 説明・同義語 | 意味や言い換え | 「勝率」= win rate、「解約リスクは 0〜100」 |
+| 検証済みクエリ | よくある質問と正解 SQL のペア | 「停滞している商談は何件？」 |'''),
+    md('''## Step 2. 最小構成の Semantic View（v1）を作る
 
-> 💡 **元教材との違い**
-> - 日本語の同義語（売上、地域、営業担当 など）を追加し、日本語の質問でも定義に沿った SQL が生成されるようにしています。
-> - 取引の結合先を製品カタログから **`PRODUCT_PLANS`（`PRODUCT_PLAN_VIEW`）** に変えています。元のままだと製品の結合が 0 件になり、「ティア別売上」が答えられません。製品カタログ（`PRODUCT_CATALOG`）は単独の論理テーブルとして残しています。'''),
-    fig("Semantic View の構成", "7つの論理テーブルと3本のリレーション（取引→顧客・製品プラン・営業担当）。製品カタログ・パイプライン・マーケティングは独立、主なメトリクスを示した図"),
-    md('''## Step 2. Semantic View を作る
+まずは **テーブルとカラムを並べただけ** の Semantic View を SQL（`CREATE SEMANTIC VIEW`）で作ります。
+説明・同義語・社内 KPI・検証済みクエリは入れていません。製品は、元教材と同じく取引の SKU でカタログに結合しています。'''),
+    sql("create_sv_basic", (HERE / "semantic_view_basic.sql").read_text().strip().rstrip(";")),
+    md('''### v1 で質問してみる
 
-YAML で定義を書き、`SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML` で作成します。
-最後の引数 `FALSE` は「検証だけでなく実際に作成する」という意味です（`TRUE` にすると検証のみ）。
+Cortex Analyst だけを持つ評価用の Agent を作り、質問してみます（Agent については 04 で詳しく扱います。ここでは「Analyst を呼ぶための入れ物」と考えてください）。'''),
+    py('''def create_eval_agent(agent_name: str, sv_name: str):
+    """指定した Semantic View だけをツールに持つ、評価用の Agent を作る"""
+    session.sql(f"""
+CREATE OR REPLACE AGENT {DB}.{SCHEMA}.{agent_name}
+  COMMENT = 'Evaluation agent (Cortex Analyst only) for {sv_name}'
+  FROM SPECIFICATION $$
+  models:
+    orchestration: auto
+  instructions:
+    response: Answer briefly with the number. Reply in the same language as the question.
+  tools:
+    - tool_spec:
+        type: cortex_analyst_text_to_sql
+        name: analyst
+        description: Sales operations data
+  tool_resources:
+    analyst:
+      semantic_view: {DB}.{SCHEMA}.{sv_name}
+      execution_environment:
+        type: warehouse
+        warehouse: {HOL_WH}
+  $$""").collect()
+    print("OK:", agent_name, "→", sv_name)
 
-定義は長いですが、ポイントは次の3つです。
-- **メトリクスを明示**（`TOTAL_REVENUE: SUM(DEAL_SIZE_USD)` など）
-- **リレーション**で取引を顧客・**製品プラン**（01 の Step 6 で作ったビュー）・営業担当に結合
-- **verified_queries** に6つの代表的な質問を登録
+create_eval_agent("EVAL_AGENT_V1", "SALES_OPS_SV_BASIC")'''),
+    py(ASK_AGENT),
+    py('_ = ask_agent("停滞している商談は何件？", agent="EVAL_AGENT_V1")'),
+    md('''> 💡 回答の数字と、生成された SQL の条件を見てください。「停滞」の定義（40日超・未クローズ）を知らないため、
+> Agent は自分で条件を推測するか、答えられないと返します。01 で確かめた正解は **43 件** です。'''),
+    md('''## Step 3. 改善版の Semantic View（v2）を作る
 
-> 補足：verified_queries を物理テーブル名で書くと警告が出ますが、論理名に自動変換されるため動作に影響はありません。'''),
+v1 に次を加えた改善版を、YAML 形式で作ります（`SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`）。
+
+| # | 追加するもの | 解決する問題 |
+|---|---|---|
+| 1 | **説明（description）と同義語（synonyms）**（日本語含む） | 「解約リスクは 0〜100」「勝率＝win rate」などカラム名だけでは伝わらない意味を補う |
+| 2 | **リレーションの修正**（取引 → `PRODUCT_PLAN_VIEW`） | v1 では製品の結合が 0 件。プラン単位でつなぎ直す |
+| 3 | **社内 KPI のメトリクス** | 停滞商談・失注リスク商談・勝率・推奨カバレッジ未満の人数などを、PDF レポートの基準どおりに定義 |
+| 4 | **検証済みクエリ（verified_queries）** | よく聞かれる質問に「お墨付きの SQL」を用意。`use_as_onboarding_question: true` で Snowflake Intelligence の質問候補にも出る |
+
+追加した社内 KPI の例：
+
+| メトリクス | 定義 | 根拠 |
+|---|---|---|
+| `STALLED_DEAL_COUNT` | 未クローズで現ステージ滞留が **40日超** の件数 | Customer Intelligence レポート |
+| `AT_RISK_DEAL_COUNT` / `AT_RISK_PIPELINE_VALUE` | 未クローズ・**競合あり・決裁者未接触** の件数／金額 | 同上 |
+| `WIN_RATE_PCT` | 受注 ÷（受注＋失注）× 100 | 社内の定義 |
+| `REPS_BELOW_COVERAGE_TARGET` | パイプラインカバレッジ **1.6 倍未満** の営業担当数 | Sales Performance レポート |
+| `EXPANSION_TARGET_CUSTOMERS` | 解約リスク **30 未満** かつ拡大余地 High/Medium の顧客数 | 社内の定義 |'''),
+    fig("Semantic View v2 の構成", "7つの論理テーブル、3本のリレーション、社内 KPI のメトリクス、検証済みクエリ"),
     sql("create_semantic_view", SV_CELL),
     md("作成できたか確認し、ハンズオン用ロールに参照権限を付けます。"),
-    sql("show_semantic_views", f"SHOW SEMANTIC VIEWS IN SCHEMA CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA"),
-    py('''session.sql(f"GRANT SELECT ON SEMANTIC VIEW {DB}.{SCHEMA}.SALES_OPS_SEMANTIC_VIEW TO ROLE {HOL_ROLE}").collect()
+    sql("show_semantic_views", "SHOW SEMANTIC VIEWS IN SCHEMA CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA"),
+    py('''for sv in ["SALES_OPS_SV_BASIC", "SALES_OPS_SEMANTIC_VIEW"]:
+    session.sql(f"GRANT SELECT ON SEMANTIC VIEW {DB}.{SCHEMA}.{sv} TO ROLE {HOL_ROLE}").collect()
 print("OK: Semantic View への SELECT を付与しました")'''),
-    md('''### 定義の中身を見る
+    md('''### SQL で直接クエリしてみる
 
-`DESCRIBE SEMANTIC VIEW` で、登録されたディメンション・メトリクスなどを一覧できます。'''),
-    sql("describe_semantic_view", '''DESCRIBE SEMANTIC VIEW CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_SEMANTIC_VIEW'''),
-    md('''## Step 3. Semantic View を SQL で直接クエリする
-
-Agent を作る前に、Semantic View だけで正しく集計できるかを確かめます。
-`SEMANTIC_VIEW()` 関数は、**ディメンションとメトリクスを指定するだけ**で、結合や集計は定義に従って Snowflake が組み立てます。
-
-期待される結果：North America が最大（約 $5.95M）、続いて EMEA（約 $4.20M）。2つ目のクエリはプラン別で、Enterprise / Annual が最大（約 $5.07M）です。'''),
-    sql("sv_revenue_by_region", '''SELECT * FROM SEMANTIC_VIEW(
+`SEMANTIC_VIEW()` 関数を使うと、**メトリクス名を指定するだけ**で、定義どおりの集計を SQL から使えます。
+社内 KPI が Semantic View の中に「部品」として入ったことが分かります。'''),
+    sql("sv_kpis", '''SELECT * FROM SEMANTIC_VIEW(
   CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_SEMANTIC_VIEW
-  DIMENSIONS TRANSACTIONS.REGION
-  METRICS TRANSACTIONS.TOTAL_REVENUE
-)
-ORDER BY TOTAL_REVENUE DESC'''),
+  METRICS PIPELINE.STALLED_DEAL_COUNT, PIPELINE.AT_RISK_DEAL_COUNT, PIPELINE.WIN_RATE_PCT,
+          REPS.REPS_BELOW_COVERAGE_TARGET
+)'''),
     sql("sv_revenue_by_plan", '''SELECT * FROM SEMANTIC_VIEW(
   CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_SEMANTIC_VIEW
-  DIMENSIONS PRODUCT_PLANS.PRODUCT_TIER, PRODUCT_PLANS.BILLING_FREQUENCY
+  DIMENSIONS PRODUCT_PLANS.PRODUCT_TIER
   METRICS TRANSACTIONS.TOTAL_REVENUE
 )
 ORDER BY TOTAL_REVENUE DESC'''),
-    md('''## Step 4. Cortex Agent を作る
+    md('''### Snowsight で中身を見る（GUI）
 
-Cortex Agent は、質問を理解して適切なツールを選び、結果を回答にまとめる AI エージェントです。
-今回のツールは **Cortex Analyst**（自然言語 → SQL）1つで、参照先は Step 2 の Semantic View です。
+1. Snowsight 左メニュー **「AI と ML」→「Cortex Analyst」** を開く
+2. `CORTEX_QUICK_HOL_DB` の `SALES_OPS_SEMANTIC_VIEW` をクリック
+3. **Logical tables / Relationships / Metrics / Verified queries** を開き、`SALES_OPS_SV_BASIC` と見比べる
+
+> Semantic View の編集画面から、同義語や検証済みクエリを GUI で追加することもできます。'''),
+    fig("Cortex Analyst の Semantic View 画面", "SALES_OPS_SEMANTIC_VIEW の Metrics に STALLED_DEAL_COUNT などが並んでいる画面"),
+    md('''## Step 4. 正答率を比べる（v1 vs v2）
+
+同じ 9 問を v1・v2 それぞれに投げ、**Analyst が生成した SQL を実行して、結果に正解の値が含まれるか**で自動採点します。
+正解は 01 で SQL を使って確かめた値です。
+
+| # | 質問 | 正解 | ポイント |
+|---|---|---|---|
+| 1 | 北米の売上合計は？ | $5,947,306.61 | 基本の集計 |
+| 2 | Enterprise ティアの売上合計は？ | $7,816,021.78 | 製品の結合（データの落とし穴） |
+| 3 | 売上が最も大きい業種はどこ？ | Technology | テーブルをまたぐ集計 |
+| 4 | 停滞している商談は何件？ | 43 件 | 社内 KPI |
+| 5 | 目標を達成している営業担当は何人？ | 87 人 | 基本の集計 |
+| 6 | 解約リスクが低く、拡大余地が High の顧客は何社？ | 25 社 | 「低い」＝30 未満（0〜100 の尺度） |
+| 7 | 失注リスクのある商談の金額合計は？ | $3,629,041.99 | 社内 KPI |
+| 8 | パイプラインカバレッジが推奨水準を下回る営業担当は何人？ | 63 人 | PDF に書かれた基準（1.6 倍） |
+| 9 | 商談の勝率は？ | 69.7% | 社内 KPI |
+
+> 9 問を 5 並列で投げるので、1 回の採点は 30〜60 秒ほどです。AI の回答は毎回少しずつ変わるため、v1 の点数は実行ごとに前後します。'''),
+    py('''import time
+from concurrent.futures import ThreadPoolExecutor
+
+EVAL_SET = [
+    ("北米の売上合計は？",                                     5947306.61),
+    ("Enterprise ティアの売上合計は？",                         7816021.78),
+    ("売上が最も大きい業種はどこ？",                            "Technology"),
+    ("停滞している商談は何件？",                                43),
+    ("目標を達成している営業担当は何人？",                      87),
+    ("解約リスクが低く、拡大余地が High の顧客は何社？",        25),
+    ("失注リスクのある商談の金額合計は？",                      3629041.99),
+    ("パイプラインカバレッジが推奨水準を下回る営業担当は何人？", 63),
+    ("商談の勝率は？",                                          69.7),
+]
+
+def _matches(expected, values):
+    for v in values:
+        if v is None:
+            continue
+        if isinstance(expected, str):
+            if expected.lower() in str(v).lower():
+                return True
+        else:
+            try:
+                if abs(float(v) - expected) <= max(0.5, abs(expected) * 0.005):
+                    return True
+            except (TypeError, ValueError):
+                pass
+    return False
+
+def _grade(agent_fqn, question, expected):
+    t = time.time()
+    payload = json.dumps({"messages": [{"role": "user", "content": [{"type": "text", "text": question}]}]})
+    try:
+        raw = session.sql("SELECT SNOWFLAKE.CORTEX.DATA_AGENT_RUN(?, ?) AS R", params=[agent_fqn, payload]).collect()[0]["R"]
+        resp = json.loads(raw) if isinstance(raw, str) else raw
+        sqls = [x["json"]["sql"] for c in resp.get("content", []) if c.get("type") == "tool_result"
+                for x in c.get("tool_result", {}).get("content", []) if x.get("json", {}).get("sql")]
+        values = [v for row in session.sql(sqls[-1]).collect()[:50] for v in row] if sqls else []
+        return {"QUESTION": question, "OK": _matches(expected, values), "SEC": round(time.time() - t)}
+    except Exception as e:
+        return {"QUESTION": question, "OK": False, "SEC": round(time.time() - t), "ERROR": str(e)[:100]}
+
+def evaluate(agent_name: str):
+    fqn = f"{DB}.{SCHEMA}.{agent_name}"
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        rows = list(ex.map(lambda qa: _grade(fqn, *qa), EVAL_SET))
+    print(f"=== {agent_name}: {sum(r['OK'] for r in rows)} / {len(rows)} 正解")
+    for r in rows:
+        print(f"  {'○' if r['OK'] else '×'}  {r['QUESTION']}")
+    return rows'''),
+    py('''create_eval_agent("EVAL_AGENT_V2", "SALES_OPS_SEMANTIC_VIEW")
+
+result_v1 = evaluate("EVAL_AGENT_V1")
+result_v2 = evaluate("EVAL_AGENT_V2")'''),
+    md('''### 結果を並べる'''),
+    py('''import pandas as pd
+
+df = pd.DataFrame({
+    "質問": [r["QUESTION"] for r in result_v1],
+    "v1（最小構成）": ["○" if r["OK"] else "×" for r in result_v1],
+    "v2（改善版）": ["○" if r["OK"] else "×" for r in result_v2],
+})
+print(f"正答率  v1: {sum(r['OK'] for r in result_v1)}/{len(result_v1)}  →  v2: {sum(r['OK'] for r in result_v2)}/{len(result_v2)}")
+df'''),
+    md('''> ✅ 検証したアカウント（2026年10月）では **v1: 4/9 → v2: 9/9** でした。
+>
+> v1 が間違えた質問を見ると、**「データのつながり（製品）」「社内用語（停滞・失注リスク・勝率）」「社外の基準（推奨カバレッジ）」** の 3 種類に分かれます。
+> どれもモデルを賢くするのではなく、**Semantic View にビジネスの定義を書く**ことで解決しています。
+>
+> 💡 **自分でも試してみましょう**：v2 で間違える質問を見つけたら、同義語・説明・検証済みクエリを足して `create_semantic_view` を再実行し、もう一度採点します。
+> この「評価セットで測る → 定義を足す → もう一度測る」の繰り返しが、本番運用での精度向上の基本です。'''),
+    md('''### 後片付け（評価用 Agent）
+
+評価用の Agent は以降使わないので削除します（Semantic View v1 は比較用に残しておきます）。'''),
+    py('''for a in ["EVAL_AGENT_V1", "EVAL_AGENT_V2"]:
+    session.sql(f"DROP AGENT IF EXISTS {DB}.{SCHEMA}.{a}").collect()
+print("OK: 評価用 Agent を削除しました")'''),
+    md('''✅ 02 はここまでです。次は `03_cortex_search.ipynb` に進みます。'''),
+]
+
+# ------------------------------------------------------------------ 03
+nb_search = [
+    md('''# 03. Cortex Search ― PDF レポートを検索できるようにする
+
+02 の Cortex Analyst は「テーブルの数字」に答えます。一方、**「推奨カバレッジは？」「停滞商談にはどう対応すべき？」** のような答えは PDF のレポートにあります。
+**Cortex Search** は、文書を意味で検索できるようにするサービスです。
+
+```
+PDF（DOCS_STAGE）
+  ↓ ① AI_PARSE_DOCUMENT   … PDF からテキストを抽出（表は Markdown に）
+  ↓ ② SPLIT_TEXT_RECURSIVE_CHARACTER … 検索しやすい長さ（チャンク）に分割
+  ↓ ③ CREATE CORTEX SEARCH SERVICE  … ベクトル＋キーワードのハイブリッド検索インデックス
+Cortex Search Service `SALES_DOCS_SEARCH` → 04 で Agent のツールにする
+```
+
+**前提**：`02_cortex_analyst.ipynb` を実行済みであること  
+**所要時間**：約10分'''),
+    fig("Cortex Search の処理の流れ", "PDF → テキスト抽出 → チャンク分割 → 検索インデックス → 質問に近いチャンクを返す"),
+    md("## Step 0. セッションの準備"),
+    py(SETUP),
+    md('''## Step 1. PDF からテキストを取り出す
+
+`AI_PARSE_DOCUMENT` の `LAYOUT` モードは、見出しや**表の構造を保ったまま** Markdown のテキストにします。'''),
+    sql("parse_docs", f'''CREATE OR REPLACE TABLE {FQ}DOCS_PARSED AS
+SELECT RELATIVE_PATH AS FILE_NAME,
+       AI_PARSE_DOCUMENT(TO_FILE('@{FQ}DOCS_STAGE', RELATIVE_PATH), {{'mode': 'LAYOUT'}}):content::STRING AS CONTENT
+FROM DIRECTORY(@{FQ}DOCS_STAGE)'''),
+    sql("show_parsed", f'''SELECT FILE_NAME, LENGTH(CONTENT) AS CHARS, LEFT(CONTENT, 500) AS HEAD FROM {FQ}DOCS_PARSED'''),
+    md('''## Step 2. チャンクに分割する
+
+文書全体を 1 件として検索すると、関係ない部分まで混ざって精度が下がります。約 800 文字ずつ（前後 100 文字は重ねて）に分割します。
+`'markdown'` を指定すると、見出しや段落の切れ目を優先して分割します。'''),
+    sql("chunk_docs", f'''CREATE OR REPLACE TABLE {FQ}DOCS_CHUNKS AS
+SELECT d.FILE_NAME || '#' || c.INDEX AS CHUNK_ID,
+       d.FILE_NAME,
+       c.INDEX        AS CHUNK_NO,
+       c.VALUE::STRING AS CHUNK
+FROM {FQ}DOCS_PARSED d,
+     LATERAL FLATTEN(SNOWFLAKE.CORTEX.SPLIT_TEXT_RECURSIVE_CHARACTER(d.CONTENT, 'markdown', 800, 100)) c'''),
+    sql("chunk_counts", f'''SELECT FILE_NAME, COUNT(*) AS CHUNKS, ROUND(AVG(LENGTH(CHUNK))) AS AVG_CHARS
+FROM {FQ}DOCS_CHUNKS GROUP BY FILE_NAME'''),
+    md('''## Step 3. Cortex Search Service を作る
+
+| 設定 | 値 | 意味 |
+|---|---|---|
+| `ON CHUNK` | 検索対象の列 | この列の中身で検索する |
+| `ATTRIBUTES FILE_NAME` | 絞り込みに使える列 | 「このレポートだけ」で絞り込める |
+| `EMBEDDING_MODEL` | `snowflake-arctic-embed-l-v2.0` | **多言語対応**のモデル。英語の PDF を日本語の質問で検索できる |
+| `TARGET_LAG` | `1 day` | 元のテーブルが変わったときに追従する間隔 |
+
+> 💡 既定のモデルは英語向けです。日本語で質問する場合は多言語モデルを指定してください（このハンズオンで実際に、既定モデルでは日本語の質問に対して関係の薄い表が上位に来ました）。
+>
+> 作成には 1〜2 分かかります。'''),
+    sql("create_search_service", f'''CREATE OR REPLACE CORTEX SEARCH SERVICE {FQ}SALES_DOCS_SEARCH
+  ON CHUNK
+  ATTRIBUTES FILE_NAME
+  WAREHOUSE = CORTEX_QUICK_HOL_WH
+  TARGET_LAG = '1 day'
+  EMBEDDING_MODEL = 'snowflake-arctic-embed-l-v2.0'
+  AS SELECT CHUNK_ID, CHUNK, FILE_NAME, CHUNK_NO FROM {FQ}DOCS_CHUNKS'''),
+    py('''session.sql(f"GRANT USAGE ON CORTEX SEARCH SERVICE {DB}.{SCHEMA}.SALES_DOCS_SEARCH TO ROLE {HOL_ROLE}").collect()
+print("OK: Cortex Search Service への USAGE を付与しました")'''),
+    md('''## Step 4. 検索してみる
+
+`SEARCH_PREVIEW` で、質問に近いチャンクを上位から取り出します。英語の PDF に**日本語で**質問しています。'''),
+    py('''def search_docs(query: str, limit: int = 3):
+    req = json.dumps({"query": query, "columns": ["CHUNK", "FILE_NAME"], "limit": limit})
+    res = json.loads(session.sql("SELECT SNOWFLAKE.CORTEX.SEARCH_PREVIEW(?, ?) AS R",
+                                 params=[f"{DB}.{SCHEMA}.SALES_DOCS_SEARCH", req]).collect()[0]["R"])
+    print(f"Q: {query}\\n")
+    for i, r in enumerate(res["results"], 1):
+        print(f"[{i}] {r['FILE_NAME']}\\n{' '.join(r['CHUNK'].split())[:300]}...\\n")
+
+import json
+search_docs("推奨されるパイプラインカバレッジの目安は？")'''),
+    py('search_docs("停滞している商談にはどう対応すべき？")'),
+    py('search_docs("解約リスクが高い顧客に共通する特徴は？")'),
+    md('''> ✅ それぞれの質問に、関係する段落（推奨 1.6 倍、役員スポンサーの関与、技術的なエスカレーションなど）が上位に返れば成功です。
+>
+> 💡 **GUI でも作れます**：Snowsight の **「AI と ML」→「Cortex Search」→「作成」** から、ステージ上の PDF を選ぶだけで、テキスト抽出・分割・インデックス作成までを一気に行えます。
+> 作成したサービスは同じ画面の **Playground** で検索を試せます。'''),
+    fig("Cortex Search の Playground", "SALES_DOCS_SEARCH に日本語で質問し、PDF のチャンクが返っている画面"),
+    md('''✅ 03 はここまでです。次は `04_cortex_agent.ipynb` で、Analyst と Search を 1 つの Agent にまとめます。'''),
+]
+
+# ------------------------------------------------------------------ 04
+nb_agent = [
+    md('''# 04. Cortex Agent ― Analyst と Search を組み合わせる
+
+**Cortex Agent** は、質問を理解して**どのツールを使うかを自分で判断し**、結果を回答にまとめる AI エージェントです。
+
+| ツール | 中身 | 得意な質問 |
+|---|---|---|
+| `sales_ops_analyst`（Cortex Analyst） | 02 の Semantic View v2 | 「何件？」「いくら？」「誰？」 |
+| `sales_docs_search`（Cortex Search） | 03 の PDF 検索 | 「推奨は？」「どう対応すべき？」「なぜ？」 |
+
+**両方を使うと**、「レポートの推奨値を、実際のデータが満たしているか」のような質問に 1 回で答えられます。
+
+**前提**：`03_cortex_search.ipynb` を実行済みであること  
+**所要時間**：約15分'''),
+    fig("Agent の処理の流れ", "質問 → Agent が計画 → Analyst（数字）／Search（文書）を呼ぶ → 結果を統合して回答"),
+    md("## Step 0. セッションの準備"),
+    py(SETUP),
+    md('''## Step 1. Agent を SQL で作る
 
 | spec の項目 | 内容 |
 |---|---|
 | `models.orchestration` | 使うモデル。`auto` で Snowflake が自動選択 |
-| `instructions` | 振る舞いの指示。日本語の質問には日本語で答えるよう追記 |
-| `tools` | 使えるツール（`cortex_analyst_text_to_sql`） |
-| `tool_resources` | ツールごとの設定（Semantic View、実行ウェアハウス） |
+| `instructions.orchestration` | **ツールの使い分けの指示**。数字は Analyst、推奨・方針は Search、比較は両方 |
+| `instructions.response` | 回答の書き方。日本語の質問には日本語で答える |
+| `tools` / `tool_resources` | 2 つのツールと、それぞれの参照先（Semantic View、Search Service） |
 
 > ⚠️ **ハマりどころ①：ウェアハウスの指定位置**
-> `execution_environment` は spec のトップではなく、**`tool_resources.<ツール名>` の中**に書きます。
+> Analyst の `execution_environment` は spec のトップではなく、**`tool_resources.<ツール名>` の中**に書きます。
 > 位置が違うと、作成時に `unrecognized field execution_environment`、実行時に `missing an execution environment` になります。
-> `USE WAREHOUSE` やユーザーのデフォルトウェアハウスでは代わりになりません（Quick 経由でも Agent の spec が使われます）。
 
 > ⚠️ **ハマりどころ②：作り直すと権限が消える**
-> `CREATE OR REPLACE` は既存の GRANT を引き継ぎません。ドキュメントには `COPY GRANTS` がありますが、
-> 検証したアカウント（2026年10月時点）では `CREATE AGENT ... COPY GRANTS` が構文エラーになりました。
-> そのため、ここでは作成直後に権限を付け直しています。'''),
+> `CREATE OR REPLACE` は既存の GRANT を引き継ぎません（検証したアカウントでは `CREATE AGENT ... COPY GRANTS` が構文エラーでした）。そのため作成直後に権限を付け直しています。'''),
     sql("create_agent", '''CREATE OR REPLACE AGENT CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_AGENT
-  COMMENT = 'Sales Operations analytics agent'
+  COMMENT = 'Sales Operations agent (Cortex Analyst + Cortex Search)'
   FROM SPECIFICATION $$
   models:
     orchestration: auto
 
   instructions:
     system: >
-      You are a Sales Operations analyst. Help users explore revenue trends,
-      pipeline health, sales rep performance, customer segmentation, product mix,
-      and marketing attribution. Provide clear, data-driven answers. When presenting
-      numbers, use appropriate formatting (currency for USD values, percentages for rates).
-      Always include relevant context.
+      You are a Sales Operations analyst. Help users explore revenue, pipeline health,
+      sales rep performance, customer segmentation, product mix, and marketing attribution.
+    orchestration: >
+      Use sales_ops_analyst for numbers from the sales data (revenue, pipeline, reps, customers,
+      products, marketing). Use sales_docs_search for recommendations, benchmarks, policies and
+      qualitative insights in the internal PDF reports. When a question compares the data with a
+      recommendation in the reports, use both tools.
     response: >
-      Provide concise, actionable answers about sales operations data. Include
-      relevant numbers and comparisons when helpful. Always reply in the same
-      language as the user's question (reply in Japanese if the question is in Japanese).
+      Provide concise, actionable answers. Format USD values as currency and rates as percentages.
+      When you use the reports, mention the report name. Always reply in the same language as the
+      user's question (reply in Japanese if the question is in Japanese).
 
   tools:
     - tool_spec:
         type: cortex_analyst_text_to_sql
         name: sales_ops_analyst
         description: >
-          Analyzes sales operations data including revenue, pipeline, rep performance,
-          customer health, product catalog, and marketing attribution.
+          Structured sales operations data: revenue, pipeline, rep performance, customers,
+          product plans, and marketing attribution. Includes company KPIs such as stalled deals,
+          at-risk deals, win rate and pipeline coverage target.
+    - tool_spec:
+        type: cortex_search
+        name: sales_docs_search
+        description: >
+          Internal PDF reports (Sales Performance Analysis, Customer Intelligence & Pipeline) with
+          benchmarks, recommendations, and qualitative insights.
 
   tool_resources:
     sales_ops_analyst:
@@ -484,73 +754,70 @@ Cortex Agent は、質問を理解して適切なツールを選び、結果を�
       execution_environment:
         type: warehouse
         warehouse: CORTEX_QUICK_HOL_WH
+    sales_docs_search:
+      name: CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_DOCS_SEARCH
+      max_results: 4
+      title_column: FILE_NAME
+      id_column: CHUNK_ID
   $$'''),
     py('''session.sql(f"GRANT USAGE ON AGENT {DB}.{SCHEMA}.SALES_OPS_AGENT TO ROLE {HOL_ROLE}").collect()
 print("OK: Agent への USAGE を付与しました")'''),
-    sql("show_agent_grants", '''SHOW GRANTS ON AGENT CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_AGENT'''),
-    md('''## Step 5. Agent に質問する
+    sql("show_agent_grants", "SHOW GRANTS ON AGENT CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_AGENT"),
+    md('''## Step 2. Agent に質問する
 
-Quick につなぐ前に、Snowflake 上で Agent が正しく答えるかを確認します。**ここで失敗する場合は、Quick からも同じエラーになります。**
+Quick につなぐ前に、Snowflake 上で答えられるかを確認します。**ここで失敗する場合は、Quick からも同じエラーになります。**
+各回答の上に「使ったツール」が表示されます。質問によって Agent がツールを使い分けていることを確かめてください。'''),
+    py(ASK_AGENT),
+    md('''| # | 質問 | 使うはずのツール | 期待される結果（目安） |
+|---|---|---|---|
+| 1 | 地域別の売上を教えて | Analyst | 北米 約 $5.95M が最大 |
+| 2 | 停滞商談は何件で、金額はいくら？ | Analyst | 43 件、約 $4.37M |
+| 3 | レポートで推奨されているパイプラインカバレッジは？ | Search | 1.6 倍（Sales Performance Analysis） |
+| 4 | 推奨カバレッジを下回っている営業担当は何人？推奨値の根拠も教えて | **両方** | 63 人、1.6 倍の根拠 |
+| 5 | 停滞商談への推奨アクションは？対象の件数と金額も | **両方** | 役員スポンサーの関与など＋43 件 |
 
-`SNOWFLAKE.CORTEX.DATA_AGENT_RUN` で Agent を呼び出します。下の関数は、回答の文章と Cortex Analyst が生成した SQL を取り出して表示します。'''),
-    fig("Agent の処理の流れ", "質問 → Agent が意図を判断 → Cortex Analyst が Semantic View から SQL 生成 → 実行 → 結果を文章・表にまとめる"),
-    py('''import json
-
-AGENT_FQN = f"{DB}.{SCHEMA}.SALES_OPS_AGENT"
-
-def ask_agent(question: str, show_sql: bool = True):
-    payload = json.dumps({"messages": [{"role": "user", "content": [{"type": "text", "text": question}]}]})
-    raw = session.sql("SELECT SNOWFLAKE.CORTEX.DATA_AGENT_RUN(?, ?) AS R", params=[AGENT_FQN, payload]).collect()[0]["R"]
-    resp = json.loads(raw) if isinstance(raw, str) else raw
-    texts, sqls = [], []
-    for c in resp.get("content", []):
-        if c.get("type") == "text" and c.get("text", "").strip():
-            texts.append(c["text"])
-        elif c.get("type") == "tool_result":
-            for x in c.get("tool_result", {}).get("content", []):
-                if x.get("json", {}).get("sql"):
-                    sqls.append(x["json"]["sql"])
-    print(f"Q: {question}\\n")
-    print("\\n".join(texts))
-    if show_sql:
-        for s in sqls:
-            print("\\n--- Cortex Analyst が生成した SQL ---\\n" + s)
-    return resp'''),
-    md('''| # | 質問 | 期待される結果（目安） |
-|---|---|---|
-| 1 | What is total revenue by region? | North America が最大（約 $5.95M）、続いて EMEA |
-| 2 | Which 5 reps have the highest quota attainment? | Steven Moore（約 129.9%）がトップ |
-| 3 | What is pipeline value by stage and how many deals have competitors? | 総額 約 $19.4M、競合ありは 90 件、Proposal が最大 |
-| 4 | 地域別の売上を教えて | 1 と同じ数字が日本語で返る |
-| 5 | 商談ステージ別のパイプライン金額を教えて | 3 と同じ数字が日本語で返る |
-| 6 | 製品ティア別の売上を教えて | Enterprise が最大（約 $7.82M）、Professional 約 $3.58M、Starter 約 $0.95M |
-
-> 💡 1回の質問には 10〜30 秒ほどかかります。Quick から呼ぶ場合も同じ時間がかかります（60 秒を超えるとタイムアウト）。'''),
-    py('_ = ask_agent("What is total revenue by region?")'),
-    py('_ = ask_agent("Which 5 reps have the highest quota attainment?")'),
-    py('_ = ask_agent("What is pipeline value by stage and how many deals have competitors?")'),
+> 💡 1 回の質問には 15〜40 秒ほどかかります。Quick から呼ぶ場合も同じです（60 秒を超えるとタイムアウト）。'''),
     py('_ = ask_agent("地域別の売上を教えて")'),
-    py('_ = ask_agent("商談ステージ別のパイプライン金額を教えて")'),
-    py('_ = ask_agent("製品ティア別の売上を教えて")'),
+    py('_ = ask_agent("停滞商談は何件で、金額はいくら？")'),
+    py('_ = ask_agent("レポートで推奨されているパイプラインカバレッジは？", show_sql=False)'),
+    py('_ = ask_agent("推奨カバレッジを下回っている営業担当は何人？推奨値の根拠も教えて")'),
+    py('_ = ask_agent("停滞商談への推奨アクションは？対象の件数と金額も", show_sql=False)'),
     md('''### ハンズオン用ロールで実行できるか確認する
 
 Quick からはハンズオン用ロールで実行されます。ロールを切り替えて同じように答えられるか確かめます。'''),
     py('''session.use_role(HOL_ROLE)
-_ = ask_agent("営業担当の目標達成率トップ3は？", show_sql=False)
-session.use_role("ACCOUNTADMIN")'''),
-    md('''> ✅ すべての質問に、数字の入った回答と生成 SQL が返れば成功です。
-> 個別製品・製品カテゴリ別の売上は、元データに情報がないため答えられません（01 の Step 6 を参照）。
+try:
+    _ = ask_agent("営業担当の目標達成率トップ3は？", show_sql=False)
+finally:
+    session.use_role("ACCOUNTADMIN")'''),
+    md('''## Step 3. Agent Studio で確認・編集する（GUI）
+
+SQL で作った Agent は、Snowsight の画面からも確認・編集できます。
+
+1. Snowsight 左メニュー **「AI と ML」→「Agents」**（Agent Studio）を開く
+2. `SALES_OPS_AGENT` をクリック
+3. **「Configuration」** タブで次を確認する
+   - **Tools**：`sales_ops_analyst`（Semantic View）と `sales_docs_search`（Cortex Search）の 2 つ
+   - **Instructions**：ツールの使い分けの指示
+4. 右側のチャット欄で、上の質問を試す。回答の下の **「思考過程（Thinking）」** を開くと、どのツールをどの順に呼んだかが分かります
+5. （任意）**Sample questions** に質問例を追加し、右上の **「Save」** をクリック
+
+> ⚠️ GUI で編集した後に、このNotebookの `create_agent` セルを再実行すると、**GUI の変更は上書きされます**。
+
+> 💡 **Snowflake Intelligence でも使えます**：Snowsight 左メニュー **「AI と ML」→「Snowflake Intelligence」** で `SALES_OPS_AGENT` を選ぶと、チャット画面から同じ Agent に質問できます（02 で `use_as_onboarding_question: true` にした質問が候補に出ます）。'''),
+    fig("Agent Studio の Configuration 画面", "SALES_OPS_AGENT の Tools に Cortex Analyst と Cortex Search の 2 つが並んでいる画面"),
+    md('''> ✅ すべての質問に回答が返り、質問 4・5 で 2 つのツールが使われていれば成功です。
 >
 > ❌ `Access denied for trial accounts`（399504）が出た場合は、トライアルの AI 制限です。01 の「トライアルアカウントの注意」を参照してください。
 
-次は `03_mcp_and_oauth.ipynb` に進みます。'''),
+次は `05_mcp_and_oauth.ipynb` に進みます。'''),
 ]
 
-# ------------------------------------------------------------------ 03
-nb3 = [
-    md('''# 03. MCP Server と OAuth ― Amazon Quick から呼べるようにする
+# ------------------------------------------------------------------ 05
+nb5 = [
+    md('''# 05. MCP Server と OAuth ― Amazon Quick から呼べるようにする
 
-3本目では、02 で作った Agent を **外部（Amazon Quick）から呼べるように公開** します。
+5本目では、04 で作った Agent を **外部（Amazon Quick）から呼べるように公開** します。
 元教材では Cortex Code スキルの Step 5〜7 にあたる部分です。
 
 | 作るもの | 役割 |
@@ -558,8 +825,8 @@ nb3 = [
 | MCP Server `SALES_OPS_MCP_SERVER` | Agent を MCP（標準プロトコル）のツールとして公開する窓口 |
 | OAuth 連携 `SALES_OPS_QUICK_SUITE_OAUTH` | Quick のユーザーが Snowflake にログインするための仕組み |
 
-**前提**：`02_semantic_view_and_agent.ipynb` を最後まで実行済みであること'''),
-    fig("Quick から Snowflake への接続の流れ", "Quick（Chat Agent / Flow）→ OAuth ログイン → MCP Server → Cortex Agent → Cortex Analyst → Semantic View → テーブル。返るのは結果のみ"),
+**前提**：`04_cortex_agent.ipynb` を最後まで実行済みであること'''),
+    fig("Quick から Snowflake への接続の流れ", "Quick（Chat Agent / Flow）→ OAuth ログイン → MCP Server → Cortex Agent → Cortex Analyst（Semantic View）／ Cortex Search（PDF）。返るのは結果のみ"),
     md("## Step 0. セッションの準備"),
     py(SETUP + '''
 
@@ -590,21 +857,21 @@ Snowflake Managed MCP Server を使うと、**サーバーを自前で立てず�
         name: "sales_ops_agent"
         type: "CORTEX_AGENT_RUN"
         identifier: "CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_AGENT"
-        description: "Ask questions about sales operations data including revenue, pipeline, rep performance, customers, products, and marketing."
+        description: "Ask questions about sales operations data (revenue, pipeline, reps, customers, products, marketing) and the internal sales reports (recommendations, benchmarks)."
   $$'''),
     md('''## Step 2. 権限を付ける
 
-MCP Server の USAGE だけでは、配下のツールは使えません。**Agent と Semantic View の権限も必要**です（02 で付与済み）。
+MCP Server の USAGE だけでは、配下のツールは使えません。**Agent・Semantic View・Cortex Search の権限も必要**です（02〜04 で付与済み）。
 ここでは MCP Server への USAGE を付け、3つがそろっているかをまとめて確認します。
 
-> 💡 **元教材との違い**：AWS Workshop 5章 Step 6 では MCP Server への GRANT が2回書かれ、Agent への GRANT が抜けています。本 Notebook では 02 で Agent への GRANT を行っています。'''),
+> 💡 **元教材との違い**：AWS Workshop 5章 Step 6 では MCP Server への GRANT が2回書かれ、Agent への GRANT が抜けています。本ハンズオンでは 04 で Agent への GRANT を行っています。'''),
     py('''session.sql(f"GRANT USAGE ON MCP SERVER {DB}.{SCHEMA}.SALES_OPS_MCP_SERVER TO ROLE {HOL_ROLE}").collect()
 
-for obj in ["MCP SERVER", "AGENT", "SEMANTIC VIEW"]:
-    name = {"MCP SERVER": "SALES_OPS_MCP_SERVER", "AGENT": "SALES_OPS_AGENT", "SEMANTIC VIEW": "SALES_OPS_SEMANTIC_VIEW"}[obj]
+for obj in ["MCP SERVER", "AGENT", "SEMANTIC VIEW", "CORTEX SEARCH SERVICE"]:
+    name = {"MCP SERVER": "SALES_OPS_MCP_SERVER", "AGENT": "SALES_OPS_AGENT", "SEMANTIC VIEW": "SALES_OPS_SEMANTIC_VIEW", "CORTEX SEARCH SERVICE": "SALES_DOCS_SEARCH"}[obj]
     rows = session.sql(f"SHOW GRANTS ON {obj} {DB}.{SCHEMA}.{name}").collect()
     ok = any(r["grantee_name"] == HOL_ROLE for r in rows)
-    print(f"{obj:<14} {name:<26} {HOL_ROLE} への付与: {'OK' if ok else '未付与'}")'''),
+    print(f"{obj:<22} {name:<26} {HOL_ROLE} への付与: {'OK' if ok else '未付与'}")'''),
     sql("show_mcp_servers", '''SHOW MCP SERVERS IN SCHEMA CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA'''),
     md('''## Step 3. 接続ユーザーの既定ロールを設定する
 
@@ -744,6 +1011,8 @@ if RUN_CLEANUP:
         f"DROP MCP SERVER IF EXISTS {DB}.{SCHEMA}.SALES_OPS_MCP_SERVER",
         f"DROP AGENT IF EXISTS {DB}.{SCHEMA}.SALES_OPS_AGENT",
         f"DROP SEMANTIC VIEW IF EXISTS {DB}.{SCHEMA}.SALES_OPS_SEMANTIC_VIEW",
+        f"DROP SEMANTIC VIEW IF EXISTS {DB}.{SCHEMA}.SALES_OPS_SV_BASIC",
+        f"DROP CORTEX SEARCH SERVICE IF EXISTS {DB}.{SCHEMA}.SALES_DOCS_SEARCH",
         "DROP SECURITY INTEGRATION IF EXISTS SALES_OPS_QUICK_SUITE_OAUTH",
     ]
     if RESTORE_DEFAULT_ROLE:
@@ -759,7 +1028,12 @@ else:
     print("RUN_CLEANUP = False のため何もしていません")'''),
 ]
 
+
 OUT.mkdir(parents=True, exist_ok=True)
-save("01_data_setup.ipynb", nb1)
-save("02_semantic_view_and_agent.ipynb", nb2)
-save("03_mcp_and_oauth.ipynb", nb3)
+for old in ["01_data_setup.ipynb", "02_semantic_view_and_agent.ipynb", "03_mcp_and_oauth.ipynb"]:
+    (OUT / old).unlink(missing_ok=True)
+save("01_explore_data.ipynb", nb1)
+save("02_cortex_analyst.ipynb", nb2)
+save("03_cortex_search.ipynb", nb_search)
+save("04_cortex_agent.ipynb", nb_agent)
+save("05_mcp_and_oauth.ipynb", nb5)

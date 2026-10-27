@@ -34,5 +34,5 @@ LS @QUICK_HOL_GIT_REPO/branches/main/notebooks/;
 --   2. Repository URL : https://github.com/sfc-gh-dmiyagawa/quick-snowflake-hol
 --      API integration: QUICK_HOL_GIT_INTEGRATION
 --      認証            : Public repository（認証なし）
---   3. 作成されたワークスペースで notebooks/01_data_setup.ipynb を開いて実行
+--   3. setup.sql を実行してから、ワークスペースで notebooks/01_explore_data.ipynb を開いて実行
 -- ----------------------------------------------------------------------------

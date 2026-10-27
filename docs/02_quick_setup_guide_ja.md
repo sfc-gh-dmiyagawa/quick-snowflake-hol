@@ -3,9 +3,9 @@
 AWS Workshop「AI-Powered Conversations with your Data Using Amazon Quick and Snowflake via MCP」6章・7章の日本語版です。
 ハンズオンで詰まりやすい点（トライアルアカウント、リージョン、Flow のプロンプト）を修正・補足しています。
 
-**前提**：`notebooks/03_mcp_and_oauth.ipynb` を最後まで実行し、Step 5 の値（6項目）を表示できること。
+**前提**：`notebooks/05_mcp_and_oauth.ipynb` を最後まで実行し、Step 5 の値（6項目）を表示できること。
 
-| 03 の Step 5 で表示される値 | 使う場所 |
+| 05 の Step 5 で表示される値 | 使う場所 |
 |---|---|
 | MCP server endpoint | 手順 3-4（Connect） |
 | Client ID / Client secret | 手順 3-5（Authenticate） |
@@ -18,10 +18,10 @@ AWS Workshop「AI-Powered Conversations with your Data Using Amazon Quick and Sn
 
 | 確認すること | 理由 |
 |---|---|
-| **AWS コンソールのリージョンが US West (Oregon) `us-west-2`** | Snowflake の OAuth 連携には `https://us-west-2.quicksight.aws.amazon.com/sn/oauthcallback` を登録しています。別リージョンで Quick を作ると、ログイン後にリダイレクトエラーになります（別リージョンを使う場合は 03 の `QUICK_REGION` を変えて OAuth 連携を作り直してください）。 |
+| **AWS コンソールのリージョンが US West (Oregon) `us-west-2`** | Snowflake の OAuth 連携には `https://us-west-2.quicksight.aws.amazon.com/sn/oauthcallback` を登録しています。別リージョンで Quick を作ると、ログイン後にリダイレクトエラーになります（別リージョンを使う場合は 05 の `QUICK_REGION` を変えて OAuth 連携を作り直してください）。 |
 | **Snowflake のユーザー名とパスワードを手元に用意** | Quick から Snowflake にログインするときに使います（トライアルにサインアップしたユーザー）。 |
-| **03 の Step 3 を実行済み（DEFAULT_ROLE = `CORTEX_QUICK_HOL_ROLE`）** | DEFAULT_ROLE が ACCOUNTADMIN のままだと、OAuth ログインが拒否されます。 |
-| **Client secret はコピー直前に表示** | 03 の Step 5 で `SHOW_SECRET = True` にして実行し、貼り付けたら `False` に戻します。画面共有に注意してください。 |
+| **05 の Step 3 を実行済み（DEFAULT_ROLE = `CORTEX_QUICK_HOL_ROLE`）** | DEFAULT_ROLE が ACCOUNTADMIN のままだと、OAuth ログインが拒否されます。 |
+| **Client secret はコピー直前に表示** | 05 の Step 5 で `SHOW_SECRET = True` にして実行し、貼り付けたら `False` に戻します。画面共有に注意してください。 |
 
 ---
 
@@ -62,7 +62,7 @@ AWS Workshop「AI-Powered Conversations with your Data Using Amazon Quick and Sn
    |---|---|
    | Name | `Snowflake-Sales-Ops-MCP` |
    | Description | `Snowflake-Sales-Ops-MCP` |
-   | MCP server endpoint | 03 の **MCP server endpoint**（`https://<組織>-<アカウント>.snowflakecomputing.com/api/v2/...`） |
+   | MCP server endpoint | 05 の **MCP server endpoint**（`https://<組織>-<アカウント>.snowflakecomputing.com/api/v2/...`） |
    | Connection type | Public network |
 
 5. **Authenticate** ステップで次を入力し、**Create and continue** をクリックします。
@@ -70,15 +70,15 @@ AWS Workshop「AI-Powered Conversations with your Data Using Amazon Quick and Sn
    | 項目 | 値 |
    |---|---|
    | Authentication | User authentication（Custom user based OAuth） |
-   | Client ID | 03 の **Client ID** |
-   | Client secret | 03 の **Client secret**（`SHOW_SECRET = True` で表示した全文） |
-   | Token URL | 03 の **Token URL** |
-   | Authorization URL | 03 の **Authorization URL** |
-   | Redirect URL | 自動入力。03 の **Redirect URL** と完全に一致していることを確認 |
+   | Client ID | 05 の **Client ID** |
+   | Client secret | 05 の **Client secret**（`SHOW_SECRET = True` で表示した全文） |
+   | Token URL | 05 の **Token URL** |
+   | Authorization URL | 05 の **Authorization URL** |
+   | Redirect URL | 自動入力。05 の **Redirect URL** と完全に一致していることを確認 |
 
 6. Snowflake のサインイン画面が開きます。**Snowflake のユーザー名とパスワード**でサインインします（MFA を設定済みなら確認も求められます）。
 7. 権限の確認画面で、ロールが **`CORTEX_QUICK_HOL_ROLE`** になっていることを確認し、**Allow** をクリックします。
-   - ここで `ACCOUNTADMIN` と表示される、またはログインが拒否される場合は、03 の Step 3 が反映されていません（[トラブルシュート](troubleshooting_ja.md#oauth-ログイン)）。
+   - ここで `ACCOUNTADMIN` と表示される、またはログインが拒否される場合は、05 の Step 3 が反映されていません（[トラブルシュート](troubleshooting_ja.md#oauth-ログイン)）。
 8. ツールの確認画面で `sales_ops_agent` が表示されていることを確認し、**Next** をクリックします。
 9. 公開範囲の画面で **Publish** をクリックします。
 10. コネクタ一覧で `Snowflake-Sales-Ops-MCP` が **Connected** になります。タイルを開くと Status が *Creation in progress* → 数分で **Ready**・**Signed in** に変わります。
@@ -123,6 +123,7 @@ Space は、コネクタ・エージェント・Flow とナレッジをまとめ
 
    ## Your Capabilities
    - Answer questions about sales revenue, customers, product tiers (Starter / Professional / Enterprise), billing frequency, sales reps, pipeline, and marketing attribution
+   - Answer questions about recommendations and benchmarks in the internal sales reports (e.g. pipeline coverage target, actions for stalled deals)
    - Provide data-driven insights with supporting numbers and trends
    - Present results in clear, actionable summaries with tables when appropriate
 
@@ -151,10 +152,14 @@ Space は、コネクタ・エージェント・Flow とナレッジをまとめ
 | Which sales reps have the highest quota attainment? | Steven Moore（約 129.9%）がトップ |
 | What is the pipeline value by stage? | 総額 約 $19.4M、Proposal が最大 |
 | How does revenue break down by product tier? | Enterprise 約 $7.82M、Professional 約 $3.58M、Starter 約 $0.95M |
+| 停滞している商談は何件？ | 43 件（社内定義：未クローズで滞留 40 日超） |
+| 商談の勝率は？ | 約 69.7% |
 | Who are the top customers by lifetime value? | LTV 上位10社の表 |
 | What is marketing spend by lead source? | リードソース別の費用 |
 | 地域別の売上を教えて | 1行目と同じ数字が日本語で返る |
 | 製品ティア別・請求サイクル別の売上を教えて | Enterprise / Annual が最大（約 $5.07M） |
+| レポートで推奨されているパイプラインカバレッジは？下回っている営業担当は何人？ | 1.6 倍（Sales Performance Analysis）、63 人（**PDF 検索とデータの両方**を使う） |
+| 停滞商談への推奨アクションは？ | 役員スポンサーの関与、競合乗り換えキャンペーンなど（PDF 検索） |
 
 > 🖼️ **図の差し込み位置：Chat Agent の回答画面**
 
@@ -224,7 +229,7 @@ Flow の画面でトリガーを作成し、名前とスケジュール（例：
 
 ## 8. 後片付け
 
-- **Snowflake 側**：`03_mcp_and_oauth.ipynb` 末尾のクリーンアップセルを使います。DEFAULT_ROLE を戻す場合は `RESTORE_DEFAULT_ROLE = "ACCOUNTADMIN"` にします。
+- **Snowflake 側**：`05_mcp_and_oauth.ipynb` 末尾のクリーンアップセルを使います。DEFAULT_ROLE を戻す場合は `RESTORE_DEFAULT_ROLE = "ACCOUNTADMIN"` にします。
 - **Quick 側**：Flow → Chat Agent → Space → コネクタの順に削除します。ハンズオン用の AWS アカウントはイベント終了後に自動で削除されます。
 
 困ったときは [troubleshooting_ja.md](troubleshooting_ja.md) を参照してください。
