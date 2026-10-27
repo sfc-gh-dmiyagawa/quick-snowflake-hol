@@ -3,13 +3,15 @@
 AWS Workshop「AI-Powered Conversations with your Data Using Amazon Quick and Snowflake via MCP」6章・7章の日本語版です。
 ハンズオンで詰まりやすい点（トライアルアカウント、リージョン、Flow のプロンプト）を修正・補足しています。
 
+> 💡 画面は日本語 UI のものです。英語 UI の場合は括弧内の英語表記を目印にしてください。
+
 **前提**：`notebooks/05_mcp_and_oauth.ipynb` を最後まで実行し、Step 5 の値（6項目）を表示できること。
 
 | 05 の Step 5 で表示される値 | 使う場所 |
 |---|---|
-| MCP server endpoint | 手順 3-4（Connect） |
-| Client ID / Client secret | 手順 3-5（Authenticate） |
-| Token URL / Authorization URL | 手順 3-5（Authenticate） |
+| MCP server endpoint | 手順 3-4（接続） |
+| Client ID / Client secret | 手順 3-5（認証） |
+| Token URL / Authorization URL | 手順 3-5（認証） |
 | Redirect URL | Quick 側に表示される値と一致するか確認するだけ |
 
 ---
@@ -29,73 +31,122 @@ AWS Workshop「AI-Powered Conversations with your Data Using Amazon Quick and Sn
 
 1. AWS マネジメントコンソールにサインインします（ハンズオンでは配布された AWS アカウントを使います）。
 2. 画面上部の検索バーに **Amazon Quick** と入力し、検索結果の **Amazon Quick** をクリックします。
-3. アカウント選択画面が出たら、**Other active AWS console sessions** の中から、ハンズオン用 AWS アカウントのセッション（例：`WSParticipantRole/Participant`）を選びます。既存の Quick アカウントが表示されても無視してください。
 
-> 🖼️ **図の差し込み位置：Quick の検索とアカウント選択**
+   ![AWS コンソールで Amazon Quick を検索](../images/quick/ch6/01.png)
+
+3. アカウント選択画面が出たら、**その他のアクティブな AWS コンソールセッション**（Other active AWS console sessions）の中から、ハンズオン用 AWS アカウントのセッション（例：`WSParticipantRole/Participant`）を選びます。既存の Quick アカウントが表示されても無視してください。
+
+   ![アカウント選択画面](../images/quick/ch6/06.png)
 
 ## 2. Amazon Quick にサインアップする（初回のみ）
 
-1. **Let's get started** 画面で AWS アカウント ID が表示されていることを確認し、**Sign up for Amazon Quick** をクリックします。
+1. **すぐに始める**（Let's get started）画面で AWS アカウント ID が表示されていることを確認し、**Amazon Quick にサインアップ**をクリックします。
+
+   ![すぐに始める画面](../images/quick/ch6/02.png)
+
 2. 次のように入力します。
 
    | 項目 | 値 |
    |---|---|
-   | Account name | `HOL-LAB`（任意。世界で一意である必要があるため、使われている場合は `HOL-LAB-<名前>` など） |
-   | Email for account notifications | 自分のメールアドレス |
-   | Region | **US West (Oregon)** |
-   | Authentication method | Password-based または Single Sign-On |
-   | Encryption | Use AWS-managed key（既定） |
+   | アカウント名 | `HOL-LAB`（任意。世界で一意である必要があるため、使われている場合は `HOL-LAB-<名前>` など） |
+   | アカウント通知用メールアドレス | 自分のメールアドレス |
+   | リージョン | **US West (Oregon)** |
+   | 認証方法 | パスワードベースまたはシングルサインオン（推奨） |
+   | 暗号化 | Use AWS-managed key (Default) |
 
-3. **Create account** をクリックし、作成完了（緑のチェック）を待ちます。
-4. **Go to Amazon Quick** をクリックし、アカウント選択画面で再びハンズオン用のセッションを選ぶと、Quick のホーム画面が開きます。
+   ![アカウント情報の入力](../images/quick/ch6/03.png)
 
-> 🖼️ **図の差し込み位置：サインアップ画面（入力例）**
+3. **アカウントを作成**をクリックし、「アカウントを作成しています」→「アカウントが正常に作成されました」（緑のチェック）になるまで待ちます。
+
+   ![アカウント作成完了](../images/quick/ch6/05.png)
+
+4. **Amazon Quick に移動**をクリックし、アカウント選択画面で再びハンズオン用のセッションを選ぶと、Quick のホーム画面が開きます。
 
 ## 3. MCP コネクタを作る
 
-1. 左のナビゲーションで **Connectors** をクリックします。
-2. 検索バーの下の **Create for your team** タブを選びます。
-3. **Model Context Protocol** のタイルを探してクリックします。
-4. **Connect** ステップで次を入力し、**Next** をクリックします。
+1. 左のナビゲーションの **さらに詳しく** → **コネクタ**（Connectors）をクリックします。
+
+   ![左メニューからコネクタを開く](../images/quick/ch6/07.png)
+
+2. **外部アプリケーションを Amazon Quick に接続** の検索欄に `Snowflake` と入力します。
+3. **Snowflake Cortex Agent** のタイルをクリックします。
+
+   ![Snowflake Cortex Agent コネクタ](../images/quick/ch6/09.png)
+
+   > 💡 元教材（英語 UI）の「Model Context Protocol」タイルの代わりに、Snowflake 専用のコネクタが用意されています。入力する値は同じです。
+
+4. **接続** ステップで次を入力し、**次へ** をクリックします。
 
    | 項目 | 値 |
    |---|---|
-   | Name | `Snowflake-Sales-Ops-MCP` |
-   | Description | `Snowflake-Sales-Ops-MCP` |
-   | MCP server endpoint | 05 の **MCP server endpoint**（`https://<組織>-<アカウント>.snowflakecomputing.com/api/v2/...`） |
-   | Connection type | Public network |
+   | 名前 | `Snowflake-Sales-Ops-MCP` |
+   | 説明 | `Snowflake-Sales-Ops-MCP` |
+   | MCP サーバーエンドポイント | 05 の **MCP server endpoint**（`https://<組織>-<アカウント>.snowflakecomputing.com/api/v2/...`） |
+   | 接続タイプ | パブリックネットワーク |
 
-5. **Authenticate** ステップで次を入力し、**Create and continue** をクリックします。
+   ![接続ステップ](../images/quick/ch6/10.png)
+
+5. **認証** ステップで次を入力し、**作成して続行** をクリックします。
 
    | 項目 | 値 |
    |---|---|
-   | Authentication | User authentication（Custom user based OAuth） |
-   | Client ID | 05 の **Client ID** |
-   | Client secret | 05 の **Client secret**（`SHOW_SECRET = True` で表示した全文） |
-   | Token URL | 05 の **Token URL** |
-   | Authorization URL | 05 の **Authorization URL** |
-   | Redirect URL | 自動入力。05 の **Redirect URL** と完全に一致していることを確認 |
+   | 認証方法 / Auth 設定 | ユーザー認証 / カスタムユーザーベースの OAuth |
+   | ベース URL | 自動入力（MCP server endpoint と同じ） |
+   | クライアント ID | 05 の **Client ID** |
+   | Public OAuth client | チェックしない |
+   | クライアントシークレット | 05 の **Client secret**（`SHOW_SECRET = True` で表示した全文） |
+   | トークン URL | 05 の **Token URL** |
+   | 認証 URL | 05 の **Authorization URL** |
+   | リダイレクト URL | 自動入力。05 の **Redirect URL** と完全に一致していることを確認 |
 
-6. Snowflake のサインイン画面が開きます。**Snowflake のユーザー名とパスワード**でサインインします（MFA を設定済みなら確認も求められます）。
-7. 権限の確認画面で、ロールが **`CORTEX_QUICK_HOL_ROLE`** になっていることを確認し、**Allow** をクリックします。
-   - ここで `ACCOUNTADMIN` と表示される、またはログインが拒否される場合は、05 の Step 3 が反映されていません（[トラブルシュート](troubleshooting_ja.md#oauth-ログイン)）。
-8. ツールの確認画面で `sales_ops_agent` が表示されていることを確認し、**Next** をクリックします。
-9. 公開範囲の画面で **Publish** をクリックします。
-10. コネクタ一覧で `Snowflake-Sales-Ops-MCP` が **Connected** になります。タイルを開くと Status が *Creation in progress* → 数分で **Ready**・**Signed in** に変わります。
+   ![認証ステップ（クライアント ID・シークレットは伏せています）](../images/quick/ch6/11.png)
 
-> 🖼️ **図の差し込み位置：Connect / Authenticate の入力画面、Snowflake のサインイン・Allow 画面、Ready 状態**
+6. **書き込み権限の管理** は既定（**毎回確認する**）のまま、ツールに `ListTools` と `sales_ops_agent` が表示されていることを確認して **次へ** をクリックします。
+
+   ![書き込み権限の管理](../images/quick/ch6/12.png)
+
+7. **読み取り権限の管理** も既定のまま **次へ** をクリックします。
+
+   ![読み取り権限の管理](../images/quick/ch6/13.png)
+
+8. **Publish** ステップはそのまま（自分だけが使う設定）で **Publish** をクリックします。
+
+   ![Publish ステップ](../images/quick/ch6/14.png)
+
+9. コネクタ一覧で `Snowflake-Sales-Ops-MCP` が **Connected** になります。
+
+   ![コネクタ一覧で Connected](../images/quick/ch6/15.png)
+
+10. タイルを開くと、ステータスが *作成中* → 数分で **準備完了** に変わります。有効なツールに `sales_ops_agent` が表示されます。
+
+    ![コネクタの詳細（準備完了）](../images/quick/ch6/17.png)
+
+> 🔐 **Snowflake へのサインイン**：初めてコネクタを使うとき（手順 4 の「試してみる」やチャット）に「サインインしますか？」と表示されます。**はい** をクリックすると Snowflake のサインイン画面が開くので、**Snowflake のユーザー名とパスワード**でサインインし、ロールが **`CORTEX_QUICK_HOL_ROLE`** であることを確認して **Allow** をクリックします。サインイン後、コネクタの詳細に **サインインしました** と表示されます。
+> - ここで `ACCOUNTADMIN` と表示される、またはログインが拒否される場合は、05 の Step 3 が反映されていません（[トラブルシュート](troubleshooting_ja.md#oauth-ログイン)）。
 
 ## 4. コネクタをテストする
 
-1. コネクタの Status が **Ready** かつ **Signed in** になったら、**Try it** をクリックします。
-2. チャット欄に次を入力して送信します。
+1. コネクタの詳細画面で、右上の **試してみる**（Try it）をクリックします。
+
+   ![コネクタの詳細（試してみる）](../images/quick/ch6/16.png)
+
+2. 「サインインしますか？」と表示されたら **はい** をクリックし、上の 🔐 の手順で Snowflake にサインインします。
+
+   ![サインインの確認](../images/quick/ch6/18.png)
+
+3. チャット欄に次を入力して送信します（日本語で「どの営業担当者が最も高いノルマ達成率を記録していますか？」でも構いません）。
 
    ```
    Which sales reps have the highest quota attainment?
    ```
 
-3. アクションの確認が表示されたら **Allow** をクリックします。
-4. **Steven Moore（約 129.9%、North America - West）** がトップの表が返れば成功です。回答までは 20〜40 秒ほどかかります。
+4. **Requesting Action review**（Snowflake Cortex Agent の実行確認）が表示されたら **許可** をクリックします。
+
+   ![アクションの許可](../images/quick/ch6/20.png)
+
+5. **Steven Moore（約 129.9%、North America - West）** がトップの表が返れば成功です。回答までは 20〜40 秒ほどかかります。
+
+   ![テストの回答](../images/quick/ch6/21.png)
 
 > ✅ チェックポイント：コネクタ `Snowflake-Sales-Ops-MCP` が Ready で、テストの質問に Snowflake のデータで回答できた。
 
@@ -105,16 +156,35 @@ AWS Workshop「AI-Powered Conversations with your Data Using Amazon Quick and Sn
 
 Space は、コネクタ・エージェント・Flow とナレッジをまとめる入れ物です。
 
-1. 左のナビゲーションで **Spaces** → **Create Space** をクリックします。
-2. 名前を `Snowflake-Sales-Ops-MCP` にします。
-3. 作成した Space で **Actions** → **Add actions** をクリックし、`Snowflake-Sales-Ops-MCP` コネクタを選んで **Add** をクリックします（「Successfully added 1 resource to space」と表示されます）。
+1. 左のナビゲーションで **スペース**（Spaces）→ **スペースを作成する** をクリックします。
 
-> 🖼️ **図の差し込み位置：Space の作成とアクション追加**
+   ![スペース一覧](../images/quick/ch7/02.png)
+
+2. 名前を `Snowflake-Sales-Ops-MCP` にして **作成** をクリックします。
+
+   ![スペースの作成](../images/quick/ch7/03.png)
+
+3. 作成したスペースで **+ 追加** → **アクションを追加** をクリックします。
+
+   ![アクションを追加](../images/quick/ch7/04.png)
+
+4. **アクション** タブで `Snowflake-Sales-Ops-MCP` にチェックを入れ、**保存** をクリックします。
+
+   ![コネクタを選択](../images/quick/ch7/05.png)
+
+5. 一覧に `Snowflake-Sales-Ops-MCP`（ステータス：準備完了）が表示されます。
+
+   ![スペースにアクションが追加された](../images/quick/ch7/06.png)
 
 ## 6. Chat Agent を作る
 
-1. 左のナビゲーションで **Chat Agents** → **+ Blank** をクリックします。
-2. エージェントの設定欄に次のプロンプトを貼り、**Generate** をクリックします。
+1. 左のナビゲーションで **チャットエージェント**（Chat Agents）→ **+ ブランク** をクリックします。
+
+   ![チャットエージェント画面](../images/quick/ch7/08.png)
+
+2. エージェントの設定欄に次のプロンプトを貼り、**生成** をクリックします。
+
+   ![プロンプトを貼って生成](../images/quick/ch7/09.png)
 
    > 💡 元教材の英語プロンプトに、日本語で答える指示と、このデータでは答えられない質問の扱いを追加しています。
 
@@ -142,9 +212,17 @@ Space は、コネクタ・エージェント・Flow とナレッジをまとめ
    - End with 1-2 suggested follow-up questions
    ```
 
-3. Space のアクションとして `Snowflake-Sales-Ops-MCP` が付いていることを確認します（付いていなければ、エージェントの設定で手順 5 の Space を選びます）。
-4. **Launch chat agent** をクリックします。
-5. 次の質問を送信し、アクションの確認が出たら **Allow** をクリックします。
+3. 生成されたエージェント（例：*Sales Operations Analyst*）の設定画面で、**ナレッジ** に手順 5 のスペース、**アクション** に `Snowflake-Sales-Ops-MCP` が付いていることを確認します（付いていなければ **スペースをリンクする** / **リンクアクション** で追加します）。
+
+   ![ナレッジとアクションの確認](../images/quick/ch7/12.png)
+
+4. **チャットエージェントを起動** をクリックします。
+
+   ![チャットエージェントを起動](../images/quick/ch7/13.png)
+
+5. 右側のプレビューで次の質問を送信し、アクションの確認が出たら **許可** をクリックします。
+
+   ![アクションの許可](../images/quick/ch7/17.png)
 
 | 質問 | 期待される結果（目安） |
 |---|---|
@@ -161,7 +239,9 @@ Space は、コネクタ・エージェント・Flow とナレッジをまとめ
 | レポートで推奨されているパイプラインカバレッジは？下回っている営業担当は何人？ | 1.6 倍（Sales Performance Analysis）、63 人（**PDF 検索とデータの両方**を使う） |
 | 停滞商談への推奨アクションは？ | 役員スポンサーの関与、競合乗り換えキャンペーンなど（PDF 検索） |
 
-> 🖼️ **図の差し込み位置：Chat Agent の回答画面**
+回答の例（地域別の売上）：
+
+![Chat Agent の回答（地域別売上）](../images/quick/ch7/18.png)
 
 ## 7. Flow を作る
 
@@ -172,8 +252,13 @@ Flow は、決まった手順を自動で実行してレポートを作る機能
 > - 取引と製品カタログは SKU で結合できないため、SKU の先頭（STARTER / PRO / ENT）からティアを判定し、**ティア単位のカタログ平均値**で結合するよう Agent に指示しています。
 > - Agent には **自然言語の質問を1回だけ** 送り、計算は Flow 側で行います（SQL を送るとエラーになるため）。
 
-1. 左のナビゲーションで **Flows** → **Create Flow** をクリックします。
-2. プロンプト欄に次を貼り、**Generate** をクリックします。
+1. 左のナビゲーションで **フロー**（Flows）→ **フローを作成** をクリックします。
+
+   ![フロー画面](../images/quick/ch7/21.png)
+
+2. プロンプト欄に次を貼り、**生成** をクリックします。
+
+   ![プロンプトを貼って生成](../images/quick/ch7/22.png)
 
    ```text
    Analyze customer expansion opportunities and produce one complete downloadable report.
@@ -209,16 +294,32 @@ Flow は、決まった手順を自動で実行してレポートを作る機能
 
    > 💡 日本語のレポートにしたい場合は、最後に `Write the report in Japanese.` を追加してください。
 
-3. 生成された Flow で、コネクタ `Snowflake-Sales-Ops-MCP` が使われていることと、各ステップの内容を確認します。
-4. **Share** をクリックし、**Share with all** をオンにします（「Successfully shared flow with all users」と表示されます）。
-5. **Flow library** タブに作成した Flow が表示されます。タイルをクリックして **Start** → **Submit** をクリックします。
-6. 3〜5分ほどでレポートが生成され、ダウンロードできます。
+3. 生成された Flow（*Customer Expansion Opportunity Report*）で、3つのステップ（Retrieve Customer Expansion Data / Calculate Expansion Metrics / Review Customer Expansion Opportunities Report）と、1つ目のステップのチャットエージェントが `Sales Operations Analyst` になっていることを確認します。
 
-> 🖼️ **図の差し込み位置：Flow の生成画面、実行中の画面、完成したレポート**
+   ![生成された Flow](../images/quick/ch7/24.png)
+
+4. **共有** をクリックし、**全員と共有** をオンにします（「フローをすべてのユーザーと正常に共有しました。」と表示されます）。
+
+   ![フローを共有](../images/quick/ch7/26.png)
+
+5. **実行モード** に切り替え、**開始** をクリックします。1つ目のステップで `sales_ops_agent` の実行確認が出たら **Submit** をクリックします。
+
+   ![実行開始](../images/quick/ch7/28.png)
+   ![sales_ops_agent の実行確認](../images/quick/ch7/29.png)
+
+6. 3〜5分ほどでレポート（Executive Summary・Full Opportunity Table・Footnote）が生成され、**ダウンロード** できます。
+
+   ![完成したレポート](../images/quick/ch7/32.png)
 
 ### （任意）定期実行にする
 
-Flow の画面でトリガーを作成し、名前とスケジュール（例：毎週月曜 9:00）を設定して **Create** をクリックすると、レポートが定期的に作られます。
+1. **フロー** → **フローライブラリ** で Flow のメニュー（︙）から **トリガーを作成** をクリックします。
+
+   ![トリガーを作成](../images/quick/ch7/34.png)
+
+2. トリガー名と **Schedule**（例：Every week on Monday at 9 AM）を設定して **Next** → **Create** をクリックすると、レポートが定期的に作られます。
+
+   ![トリガーの設定](../images/quick/ch7/35.png)
 
 > ✅ チェックポイント
 > - Space `Snowflake-Sales-Ops-MCP` に MCP コネクタのアクションが付いている
