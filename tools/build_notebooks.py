@@ -328,7 +328,7 @@ UNION ALL SELECT 'MARKETING_ATTRIBUTION_TABLE',  COUNT(*) FROM {FQ}MARKETING_ATT
 
 取引と商談を数行ずつ表示します。どんなカラムにどんな値が入っているかを眺めてください。'''),
     sql("sample_transactions", f'''SELECT * FROM {FQ}SALES_TRANSACTIONS_FACT_TABLE ORDER BY TRANSACTION_DATE LIMIT 5'''),
-    sql("sample_pipeline", f'''SELECT OPPORTUNITY_NAME, CURRENT_STAGE, ESTIMATED_VALUE, DAYS_IN_CURRENT_STAGE,
+    sql("sample_pipeline", f'''SELECT OPPORTUNITY_ID, CURRENT_STAGE, ESTIMATED_VALUE, DAYS_IN_CURRENT_STAGE,
        COMPETITOR_PRESENT, DECISION_MAKER_ENGAGED
 FROM {FQ}SALES_PIPELINE_OPPORTUNITIES ORDER BY ESTIMATED_VALUE DESC LIMIT 5'''),
     md('''### ざっくり集計してみる
@@ -341,6 +341,7 @@ FROM {FQ}SALES_TRANSACTIONS_FACT_TABLE GROUP BY REGION ORDER BY REVENUE DESC''')
 FROM {FQ}SALES_PIPELINE_OPPORTUNITIES GROUP BY CURRENT_STAGE ORDER BY VALUE DESC'''),
     md('''> 💡 **気づいてほしいこと**
 > - 解約リスク `CHURN_RISK_SCORE` は **0〜100** の値です（0〜1 ではありません）。
+> - 商談名 `OPPORTUNITY_NAME` は、元データの時点で全件が空です。商談は `OPPORTUNITY_ID` で区別します。
 > - 「停滞商談」「勝率」「推奨カバレッジ」といった**社内用語は、どのテーブルにもカラムとして存在しません**。
 >   人間は「あの基準のことだな」と分かりますが、AI は分かりません。これを教えるのが 02 の Semantic View です。'''),
     md(f'''## Step 2. データの落とし穴：取引と製品がつながらない
