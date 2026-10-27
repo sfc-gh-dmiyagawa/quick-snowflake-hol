@@ -220,8 +220,20 @@ session.use_warehouse(HOL_WH)
 session.use_schema(f"{DB}.{SCHEMA}")
 print("ロール:", session.get_current_role(), "/ ウェアハウス:", session.get_current_warehouse())'''
 
-PREFLIGHT_MD = '### 事前チェック：AI 機能とクロスリージョン推論\n\n後半（Agent / Quick 連携）で詰まらないよう、**最初に** AI 機能が使えるかを確かめます。\n\n- `CORTEX_ENABLED_CROSS_REGION` は、アカウントのリージョンに必要なモデルがないときに他リージョンで推論する設定です。トライアルのリージョンによっては Agent のモデルが見つからないため、`ANY_REGION` にします（データ自体は移動しません）。\n- `AI_COMPLETE` を1回だけ呼び、トライアルの AI 制限にかかっていないかを確認します（数文字の応答なので消費はごくわずかです）。\n\n> ❌ `not available for trial accounts` / `Access denied for trial accounts` が出た場合、この先の Agent は動きません。\n> 上の「トライアルアカウントの注意」のとおりクレジットカードを登録し、このセルを再実行してください。'
-PREFLIGHT_PY = 'session.sql("ALTER ACCOUNT SET CORTEX_ENABLED_CROSS_REGION = \'ANY_REGION\'").collect()\nprint("OK: CORTEX_ENABLED_CROSS_REGION = ANY_REGION")\n\ntry:\n    r = session.sql("SELECT AI_COMPLETE(\'claude-sonnet-4-5\', \'Reply with OK only.\') AS R").collect()[0]["R"]\n    print("OK: AI 機能が使えます（応答:", str(r).strip()[:20], "）")\nexcept Exception as e:\n    msg = str(e)\n    if "trial" in msg.lower():\n        raise RuntimeError(\n            "このトライアルアカウントでは AI 機能が無効です。Admin » Billing » Payment method でクレジットカードを登録してから、"\n            "このセルを再実行してください。（イベント用 URL で作ったアカウントでは通常発生しません）") from None\n    print("⚠️ AI_COMPLETE の呼び出しに失敗しました。モデル名の問題の可能性があります（Agent の動作は 02 で確認します）:\\n", msg[:300])'
+PREFLIGHT_MD = '### 事前チェック：AI 機能とクロスリージョン推論\n\n後半（Agent / Quick 連携）で詰まらないよう、**最初に** AI 機能が使えるかを確かめます。\n\n- `CORTEX_ENABLED_CROSS_REGION` は、アカウントのリージョンに必要なモデルがないときに他リージョンで推論する設定です。トライアルのリージョンによっては Agent のモデルが見つからないため、`setup.sql` で `ANY_REGION` にしています（データ自体は移動しません）。ここでは値を確認するだけです。\n- `AI_COMPLETE` を1回だけ呼び、トライアルの AI 制限にかかっていないかを確認します（数文字の応答なので消費はごくわずかです）。\n\n> ❌ `not available for trial accounts` / `Access denied for trial accounts` が出た場合、この先の Agent は動きません。\n> 上の「トライアルアカウントの注意」のとおりクレジットカードを登録し、このセルを再実行してください。'
+PREFLIGHT_PY = '''v = session.sql("SHOW PARAMETERS LIKE 'CORTEX_ENABLED_CROSS_REGION' IN ACCOUNT").collect()
+print("CORTEX_ENABLED_CROSS_REGION:", v[0]["value"] if v else "(不明)", "（setup.sql で ANY_REGION に設定済み）")
+
+try:
+    r = session.sql("SELECT AI_COMPLETE('claude-sonnet-4-5', 'Reply with OK only.') AS R").collect()[0]["R"]
+    print("OK: AI 機能が使えます（応答:", str(r).strip()[:20], "）")
+except Exception as e:
+    msg = str(e)
+    if "trial" in msg.lower():
+        raise RuntimeError(
+            "このトライアルアカウントでは AI 機能が無効です。Admin » Billing » Payment method でクレジットカードを登録してから、"
+            "このセルを再実行してください。（イベント用 URL で作ったアカウントでは通常発生しません）") from None
+    print("⚠️ AI_COMPLETE の呼び出しに失敗しました。モデル名の問題の可能性があります（Agent の動作は 04 で確認します）:\\n", msg[:300])'''
 
 
 ASK_AGENT = '''import json
@@ -789,6 +801,7 @@ Quick からはハンズオン用ロールで実行されます。ロールを�
     py('''session.use_role(HOL_ROLE)
 try:
     _ = ask_agent("営業担当の目標達成率トップ3は？", show_sql=False)
+    _ = ask_agent("レポートで推奨されているパイプラインカバレッジは？", show_sql=False)
 finally:
     session.use_role("ACCOUNTADMIN")'''),
     md('''## Step 3. Agent Studio で確認・編集する（GUI）
