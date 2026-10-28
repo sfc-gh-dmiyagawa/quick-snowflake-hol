@@ -359,8 +359,10 @@ FROM {FQ}SALES_PIPELINE_OPPORTUNITIES GROUP BY CURRENT_STAGE ORDER BY VALUE DESC
 
 | PDF | 主な内容 |
 |---|---|
-| Sales Performance Analysis | 地域・営業担当の分析、**推奨パイプラインカバレッジ 1.6 倍**、値引きの上限の目安 |
-| Customer Intelligence & Pipeline | 解約リスクの高い顧客、**停滞商談（40日超）**と推奨アクション、施策の優先順位 |'''),
+| [Sales Performance Analysis](../data/pdfs/Sales%20Performance%20Analysis.pdf) | 地域・営業担当の分析、**推奨パイプラインカバレッジ 1.6 倍**、値引きの上限の目安 |
+| [Customer Intelligence & Pipeline](../data/pdfs/Customer%20Intelligence%20%26%20Pipeline.pdf) | 解約リスクの高い顧客、**停滞商談（40日超）**と推奨アクション、施策の優先順位 |
+
+> 💡 PDF の中身は GitHub の [`data/pdfs/`](../data/pdfs/) でそのまま開けます（Snowflake に取り込んでいるものと同じファイルです）。'''),
     sql("list_docs", f'''SELECT RELATIVE_PATH, SIZE, LAST_MODIFIED FROM DIRECTORY(@{FQ}DOCS_STAGE)'''),
     md('''## このハンズオンで作るもの
 
@@ -631,7 +633,7 @@ nb_search = [
 **Cortex Search** は、文書を意味で検索できるようにするサービスです。
 
 ```
-PDF（DOCS_STAGE）
+PDF（DOCS_STAGE。中身は GitHub の data/pdfs/ で見られます）
   ↓ ① AI_PARSE_DOCUMENT   … PDF からテキストを抽出（表は Markdown に）
   ↓ ② SPLIT_TEXT_RECURSIVE_CHARACTER … 検索しやすい長さ（チャンク）に分割
   ↓ ③ CREATE CORTEX SEARCH SERVICE  … ベクトル＋キーワードのハイブリッド検索インデックス
