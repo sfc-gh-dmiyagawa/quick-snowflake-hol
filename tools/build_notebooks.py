@@ -844,16 +844,18 @@ nb5 = [
     md("## Step 0. セッションの準備"),
     py(SETUP + '''
 
-# Quick を使うリージョン（OAuth のリダイレクト先と完全一致させる必要があります）
-QUICK_REGION = "us-west-2"
-quick_redirect_uri = f"https://{QUICK_REGION}.quicksight.aws.amazon.com/sn/oauthcallback"
+# Quick のリージョン（OAuth のリダイレクト先と完全一致させる必要があります）
+# us-west-2 / us-east-1 のどちらで Quick を作っても通るよう、両方を登録します
+QUICK_REGIONS = ["us-west-2", "us-east-1"]
+quick_redirect_uris = [f"https://{r}.quicksight.aws.amazon.com/sn/oauthcallback" for r in QUICK_REGIONS]
+quick_redirect_uri = quick_redirect_uris[0]
 
 row = session.sql("""SELECT CURRENT_USER() AS U,
   REPLACE(CURRENT_ORGANIZATION_NAME() || '-' || CURRENT_ACCOUNT_NAME(), '_', '-') AS H""").collect()[0]
 hol_user, account_host = row["U"], row["H"]
 print("ユーザー          :", hol_user)
 print("アカウントホスト  :", f"{account_host}.snowflakecomputing.com")
-print("OAuth リダイレクト:", quick_redirect_uri)'''),
+print("OAuth リダイレクト:", ", ".join(quick_redirect_uris))'''),
     md('''> 💡 **アカウントホストについて**：MCP エンドポイントや OAuth の URL は `<組織名>-<アカウント名>.snowflakecomputing.com` で組み立てます。
 > アカウント名に `_` が含まれる場合は `-` に置き換えます（URL で使えないため）。'''),
     md('''## Step 1. MCP Server を作る
@@ -925,7 +927,8 @@ Amazon Quick のユーザーは OAuth で Snowflake にログインします。�
 | 設定 | 値 | 意味 |
 |---|---|---|
 | `OAUTH_CLIENT_TYPE` | `CONFIDENTIAL` | Client Secret を使う方式 |
-| `OAUTH_REDIRECT_URI` | Quick のコールバック URL | ログイン後の戻り先。**Quick のリージョンと完全一致**させる |
+| `OAUTH_REDIRECT_URI` | Quick のコールバック URL（us-west-2） | ログイン後の戻り先。**Quick のリージョンと完全一致**が必要 |
+| `OAUTH_ALTERNATE_REDIRECT_URIS` | 同（us-east-1） | 追加で受け付ける戻り先。これで us-west-2 / us-east-1 どちらの Quick でも接続できます |
 | `OAUTH_ISSUE_REFRESH_TOKENS` | `TRUE` | 再ログインなしで使い続けられるようにする |
 | `OAUTH_USE_SECONDARY_ROLES` | `NONE` | DEFAULT_ROLE の権限だけで動かす（MCP 向けの推奨設定）。ユーザーが ACCOUNTADMIN を持っていても、Quick 経由ではハンズオン用ロールの権限に限定されます |
 | `BLOCKED_ROLES_LIST` | 既定（ACCOUNTADMIN 等） | 管理者ロールでの OAuth ログインを禁止 |
@@ -934,13 +937,15 @@ Amazon Quick のユーザーは OAuth で Snowflake にログインします。�
 作成には ACCOUNTADMIN が必要です。
 
 > ⚠️ このセルを再実行すると **Client ID / Secret が変わります**。Quick 側に登録した後で再実行した場合は、Quick のコネクタも作り直してください。'''),
-    py('''session.sql(f"""
+    py('''alt_uris_sql = ", ".join("'" + u + "'" for u in quick_redirect_uris[1:])
+session.sql(f"""
 CREATE OR REPLACE SECURITY INTEGRATION SALES_OPS_QUICK_SUITE_OAUTH
   TYPE = OAUTH
   ENABLED = TRUE
   OAUTH_CLIENT = CUSTOM
   OAUTH_CLIENT_TYPE = 'CONFIDENTIAL'
-  OAUTH_REDIRECT_URI = '{quick_redirect_uri}'
+  OAUTH_REDIRECT_URI = '{quick_redirect_uris[0]}'
+  OAUTH_ALTERNATE_REDIRECT_URIS = ({alt_uris_sql})
   OAUTH_ISSUE_REFRESH_TOKENS = TRUE
   OAUTH_USE_SECONDARY_ROLES = 'NONE'
   OAUTH_REFRESH_TOKEN_VALIDITY = 86400
@@ -967,7 +972,7 @@ quick_settings = {
     "Client secret":       secret if SHOW_SECRET else secret[:4] + "*" * (len(secret) - 4),
     "Token URL":           f"{base}/oauth/token-request",
     "Authorization URL":   f"{base}/oauth/authorize",
-    "Redirect URL":        quick_redirect_uri,
+    "Redirect URL":        " または ".join(quick_redirect_uris) + "（Quick 側の表示と一致すれば OK）",
 }
 for k, v in quick_settings.items():
     print(f"{k:<20}: {v}")'''),
@@ -980,7 +985,7 @@ for k, v in quick_settings.items():
 | Agent を作り直したら権限が消えた | `CREATE OR REPLACE` は GRANT を引き継がない | GRANT をやり直す |
 | Quick から「権限がない」 | DEFAULT_ROLE に権限がない | Step 2・3 を確認 |
 | OAuth ログインで拒否される | ACCOUNTADMIN 等は既定でブロック | 既定ロールを `CORTEX_QUICK_HOL_ROLE` に |
-| OAuth のリダイレクトエラー | `OAUTH_REDIRECT_URI` と Quick のリージョンが不一致 | `QUICK_REGION` を合わせて Step 4 を再実行 |
+| OAuth で `mismatch in the given redirect uri` | Quick のリージョンが登録済み（us-west-2 / us-east-1）以外 | エラー画面の URL の `redirect_uri=` の値を `QUICK_REGIONS` に追加して Step 4 を再実行（Client ID / Secret が変わるので Quick も再入力） |
 | Quick で 424 / タイムアウト | MCP の呼び出しは 60 秒で打ち切り | 質問を簡単にする、検証済みクエリを増やす |
 | Quick がログイン画面を繰り返す（401） | ユーザーの `ALLOWED_INTERFACES` が制限されている | Step 3 のセルで `ALL` に戻す |
 | Quick のログインで `invalid_client` | Client ID / Secret の貼り間違い、または OAuth 連携を作り直した | Step 5 の値を貼り直す |
@@ -988,7 +993,7 @@ for k, v in quick_settings.items():
 | Quick で Snowflake の URL エラー | アカウント名の `_` をそのまま使っている | Step 5 で表示された URL（`-` に置換済み）を使う |'''),
     py('''print("=== OAuth 連携")
 for r in session.sql("DESCRIBE SECURITY INTEGRATION SALES_OPS_QUICK_SUITE_OAUTH").collect():
-    if r["property"] in ("ENABLED", "OAUTH_REDIRECT_URI", "OAUTH_CLIENT_TYPE", "OAUTH_USE_SECONDARY_ROLES", "BLOCKED_ROLES_LIST"):
+    if r["property"] in ("ENABLED", "OAUTH_REDIRECT_URI", "OAUTH_ALTERNATE_REDIRECT_URIS", "OAUTH_CLIENT_TYPE", "OAUTH_USE_SECONDARY_ROLES", "BLOCKED_ROLES_LIST"):
         print(f"  {r['property']:<28} {r['property_value']}")
 
 print("\\n=== 接続ユーザーの既定設定")

@@ -20,7 +20,7 @@ AWS Workshop「AI-Powered Conversations with your Data Using Amazon Quick and Sn
 
 | 確認すること | 理由 |
 |---|---|
-| **AWS コンソールのリージョンが US West (Oregon) `us-west-2`** | Snowflake の OAuth 連携には `https://us-west-2.quicksight.aws.amazon.com/sn/oauthcallback` を登録しています。別リージョンで Quick を作ると、ログイン後にリダイレクトエラーになります（別リージョンを使う場合は 05 の `QUICK_REGION` を変えて OAuth 連携を作り直してください）。 |
+| **AWS コンソールのリージョンが US West (Oregon) `us-west-2` または US East (N. Virginia) `us-east-1`** | Snowflake の OAuth 連携には両リージョンのコールバック URL（`https://us-west-2.quicksight.aws.amazon.com/sn/oauthcallback` / `https://us-east-1.quicksight.aws.amazon.com/sn/oauthcallback`）を登録しています。それ以外のリージョンで Quick を作るとログイン後にリダイレクトエラーになります（その場合は 05 の `QUICK_REGIONS` にリージョンを追加して OAuth 連携を作り直してください）。 |
 | **Snowflake のユーザー名とパスワードを手元に用意** | Quick から Snowflake にログインするときに使います（トライアルにサインアップしたユーザー）。 |
 | **05 の Step 3 を実行済み（DEFAULT_ROLE = `CORTEX_QUICK_HOL_ROLE`）** | DEFAULT_ROLE が ACCOUNTADMIN のままだと、OAuth ログインが拒否されます。 |
 | **Client secret はコピー直前に表示** | 05 の Step 5 で `SHOW_SECRET = True` にして実行し、貼り付けたら `False` に戻します。画面共有に注意してください。 |
@@ -97,7 +97,7 @@ AWS Workshop「AI-Powered Conversations with your Data Using Amazon Quick and Sn
    | クライアントシークレット | 05 の **Client secret**（`SHOW_SECRET = True` で表示した全文） |
    | トークン URL | 05 の **Token URL** |
    | 認証 URL | 05 の **Authorization URL** |
-   | リダイレクト URL | 自動入力。05 の **Redirect URL** と完全に一致していることを確認 |
+   | リダイレクト URL | 自動入力。05 の **Redirect URL**（us-west-2 / us-east-1 のどちらか）と一致していることを確認 |
 
    ![認証ステップ（クライアント ID・シークレットは伏せています）](../images/quick/ch6/11.png)
 

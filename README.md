@@ -35,7 +35,7 @@ PDF レポート（S3）→ Cortex Search ────────────�
   - ⚠️ 通常のセルフサービストライアルでは、Cortex の AI 機能が**既定で無効**です。
   - イベント用のサインアップ URL で作ったアカウントを使うか、**Admin » Billing でクレジットカードを登録**してください。カードを登録しても、残りの無償クレジットはそのまま使えます。
   - 使えるかどうかは、01 の最初のセルで確認できます。
-- **AWS アカウント**（Amazon Quick を **us-west-2 / US West (Oregon)** で使えること）
+- **AWS アカウント**（Amazon Quick を **us-west-2（Oregon）または us-east-1（N. Virginia）** で使えること）
 
 ## 進め方
 

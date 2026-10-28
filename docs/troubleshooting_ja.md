@@ -34,11 +34,11 @@
 | 症状 | 原因 | 対処 |
 |---|---|---|
 | Snowflake のログイン後に `invalid_scope` / ロールが ACCOUNTADMIN と表示されて拒否 | DEFAULT_ROLE が ACCOUNTADMIN のまま（トライアルの初期値）。管理者ロールは OAuth でブロックされる | 05 の Step 3 を `APPLY_DEFAULT_ROLE = True` で実行 |
-| ログイン後にリダイレクトエラー（`redirect_uri` が不一致） | Quick のリージョンと `OAUTH_REDIRECT_URI` が違う | Quick を us-west-2 で作る。別リージョンなら 05 の `QUICK_REGION` を変えて Step 4 を再実行し、Quick にも新しい値を入れ直す |
+| ログイン後にリダイレクトエラー（`redirect_uri` が不一致） | Quick のリージョンが登録済み（us-west-2 / us-east-1）以外、または OAuth 連携が旧版（us-west-2 のみ） | すぐ直すなら `ALTER SECURITY INTEGRATION SALES_OPS_QUICK_SUITE_OAUTH SET OAUTH_ALTERNATE_REDIRECT_URIS = ('https://<Quickのリージョン>.quicksight.aws.amazon.com/sn/oauthcallback');`（Client ID / Secret は変わらない）。エラー画面の URL の `redirect_uri=` で実際の値を確認できる |
 | `invalid_client` | Client ID / Secret の貼り間違い（前後の空白を含む）、または OAuth 連携を作り直した | 05 の Step 5 を `SHOW_SECRET = True` で再表示して貼り直す |
 | **ログイン画面が何度も出る（ループする）** | ユーザーの `ALLOWED_INTERFACES` が `SNOWFLAKE_INTELLIGENCE` などに制限されており、MCP 呼び出しが 401（`395300 Not authorized to access interface ALL`）になる | 05 の Step 3 のセルで `('ALL')` に戻す（トライアルの既定値は ALL） |
 | MFA の画面で止まる | MFA を登録済みのユーザー | 登録した認証アプリで承認する |
-| ネットワークポリシーで拒否 | アカウントにネットワークポリシーがある（トライアルでは通常なし） | Quick（AWS us-west-2）からのアクセスを許可する |
+| ネットワークポリシーで拒否 | アカウントにネットワークポリシーがある（トライアルでは通常なし） | Quick（AWS us-west-2 / us-east-1）からのアクセスを許可する |
 
 ## Quick のコネクタ・チャット
 
