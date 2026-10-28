@@ -21,9 +21,10 @@ PDF レポート（S3）→ Cortex Search ────────────�
 | [`load.sql`](load.sql) | **API 統合の仕組み**：GitHub からワークスペースを作るための API 統合・Git リポジトリ | 約1分 |
 | [`setup.sql`](setup.sql) | **データの準備と権限**：WH・DB・ロール、S3 から6テーブルと PDF 2本、取引と製品をつなぐビュー | 約3分 |
 | [`notebooks/01_explore_data.ipynb`](notebooks/01_explore_data.ipynb) | 取り込んだデータの確認。どんなデータがあり、何を作るのか | 約10分 |
-| [`notebooks/02_cortex_analyst.ipynb`](notebooks/02_cortex_analyst.ipynb) | **Cortex Analyst**：Semantic View を最小構成で作る → 改善版を作る → 同じ9問で**正答率を比較** | 約20分 |
-| [`notebooks/03_cortex_search.ipynb`](notebooks/03_cortex_search.ipynb) | **Cortex Search**：PDF のテキスト抽出・チャンク分割・検索サービス作成 | 約10分 |
-| [`notebooks/04_cortex_agent.ipynb`](notebooks/04_cortex_agent.ipynb) | **Cortex Agent**：Analyst と Search を使い分ける Agent（SQL で作成し、Agent Studio で確認） | 約15分 |
+| [`notebooks/02_cortex_analyst.ipynb`](notebooks/02_cortex_analyst.ipynb) | **Cortex Analyst**：Semantic View を最小構成で作る → 改善版を作る → 同じ9問で**正答率を比較**（GUI / SQL の両方の作り方を記載） | 約20分 |
+| [`notebooks/03_cortex_search.ipynb`](notebooks/03_cortex_search.ipynb) | **Cortex Search**：PDF のテキスト抽出・チャンク分割・検索サービス作成（GUI / SQL） | 約10分 |
+| [`notebooks/04_cortex_agent.ipynb`](notebooks/04_cortex_agent.ipynb) | **Cortex Agent**：Analyst と Search を使い分ける Agent（GUI / SQL） | 約15分 |
+| [`semantic_views/sales_ops_semantic_view.yaml`](semantic_views/sales_ops_semantic_view.yaml) | 02 の v2 を GUI（Autopilot）で作るときにアップロードする YAML | － |
 | [`notebooks/05_mcp_and_oauth.ipynb`](notebooks/05_mcp_and_oauth.ipynb) | MCP Server・OAuth の作成、Quick 用のユーザー設定、Quick に入力する値の表示 | 約10分 |
 | [`docs/02_quick_setup_guide_ja.md`](docs/02_quick_setup_guide_ja.md) | Amazon Quick 側：コネクタ・Space・Chat Agent・Flow | 約40分 |
 

@@ -406,8 +406,26 @@ AI にテーブルだけを渡すと、「売上」「停滞商談」がどの�
 | 検証済みクエリ | よくある質問と正解 SQL のペア | 「停滞している商談は何件？」 |'''),
     md('''## Step 2. 最小構成の Semantic View（v1）を作る
 
-まずは **テーブルとカラムを並べただけ** の Semantic View を SQL（`CREATE SEMANTIC VIEW`）で作ります。
-説明・同義語・社内 KPI・検証済みクエリは入れていません。製品は、元教材と同じく取引の SKU でカタログに結合しています。'''),
+まずは **テーブルとカラムを並べただけ** の Semantic View を作ります。
+説明・同義語・社内 KPI・検証済みクエリは入れていません。製品は、元教材と同じく取引の SKU でカタログに結合しています。
+
+### 方法 A：GUI（Semantic View Autopilot）で作る
+
+1. Snowsight 左メニュー **「Workspaces」** を開き、**「Add new」→「Semantic View」** を選ぶ（Autopilot のウィザードが開きます）
+2. 保存先に `CORTEX_QUICK_HOL_DB` / `CORTEX_QUICK_HOL_SCHEMA`、名前に **`SALES_OPS_SV_BASIC`** を入力し、**Next**
+3. **SQL Queries（文脈）は空のまま**にする（v1 は「何も教えていない状態」にしたいため）
+4. **Select tables** で次の 5 つを選び、**Next**
+   - `SALES_TRANSACTIONS_FACT_TABLE` / `CUSTOMER_DIMENSION_TABLE` / `PRODUCT_CATALOG_TABLE` / `SALES_REP_PERFORMANCE_TABLE` / `SALES_PIPELINE_OPPORTUNITIES`
+5. **Select columns** はすべて選び、**サンプル値の追加** と **AI による説明の自動生成** は **オフ**にする
+6. **Create and save** → **Save and run**。数分で作成されます
+7. 作成後、Semantic Studio で **Logical tables / Relationships** を開き、どんな内容が自動で作られたかを見る
+
+> ⚠️ Autopilot はリレーションや説明を自動で推測するため、GUI 版の v1 は下の SQL 版と完全には一致しません。
+> **Step 4 の正答率比較を SQL 版と同じ条件で行うため、デモの後は方法 B のセルを実行して v1 を SQL 版にそろえてください。**
+
+> ℹ️ GUI の手順は Snowflake 公式ドキュメントをもとに書いています。画面のラベルや順番が多少違う場合があります。\n> 迷ったら **方法 B（SQL）** のセルを実行すれば、同じ名前・同じ設定で作られます（GUI で作ったものは上書きされます）。
+
+### 方法 B：SQL で作る（`CREATE SEMANTIC VIEW`）'''),
     sql("create_sv_basic", (HERE / "semantic_view_basic.sql").read_text().strip().rstrip(";")),
     md('''### v1 で質問してみる
 
@@ -460,7 +478,24 @@ v1 に次を加えた改善版を、YAML 形式で作ります（`SYSTEM$CREATE_
 | `AT_RISK_DEAL_COUNT` / `AT_RISK_PIPELINE_VALUE` | 未クローズ・**競合あり・決裁者未接触** の件数／金額 | 同上 |
 | `WIN_RATE_PCT` | 受注 ÷（受注＋失注）× 100 | 社内の定義 |
 | `REPS_BELOW_COVERAGE_TARGET` | パイプラインカバレッジ **1.6 倍未満** の営業担当数 | Sales Performance レポート |
-| `EXPANSION_TARGET_CUSTOMERS` | 解約リスク **30 未満** かつ拡大余地 High/Medium の顧客数 | 社内の定義 |'''),
+| `EXPANSION_TARGET_CUSTOMERS` | 解約リスク **30 未満** かつ拡大余地 High/Medium の顧客数 | 社内の定義 |
+
+### 方法 A：GUI で作る（YAML をアップロード）
+
+v2 は同義語・KPI・検証済みクエリが多く、画面で 1 つずつ入力すると時間がかかります。GUI では **できあがった YAML を読み込む**方法を使います。
+
+1. GitHub の [`semantic_views/sales_ops_semantic_view.yaml`](../semantic_views/sales_ops_semantic_view.yaml) を PC にダウンロードする
+   （Git 連携したワークスペースなら、左のファイル一覧の `semantic_views/` にもあります）
+2. **「Workspaces」→「Add new」→「Semantic View」** を開き、保存先 `CORTEX_QUICK_HOL_DB` / `CORTEX_QUICK_HOL_SCHEMA` を選ぶ
+3. 文脈の指定で **YAML specification のアップロード** を選び、ダウンロードした YAML を指定する
+4. 作成されたら Semantic Studio で **Metrics**（`STALLED_DEAL_COUNT` など）と **Verified queries** が入っていることを確認する
+5. （デモ）**Synonyms** に同義語を 1 つ追加する、**Verified queries** に質問を 1 つ追加するなど、GUI での編集を試す
+
+> ⚠️ 名前は YAML の中で **`SALES_OPS_SEMANTIC_VIEW`** に決まっています。Step 4 の正答率はこの内容が前提なので、**GUI で大きく変更した場合は方法 B のセルを実行して元に戻してください。**
+
+> ℹ️ GUI の手順は Snowflake 公式ドキュメントをもとに書いています。画面のラベルや順番が多少違う場合があります。\n> 迷ったら **方法 B（SQL）** のセルを実行すれば、同じ名前・同じ設定で作られます（GUI で作ったものは上書きされます）。
+
+### 方法 B：SQL で作る（`SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`）'''),
     sql("create_semantic_view", SV_CELL),
     md("作成できたか確認し、ハンズオン用ロールに参照権限を付けます。"),
     sql("show_semantic_views", "SHOW SEMANTIC VIEWS IN SCHEMA CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA"),
@@ -484,7 +519,7 @@ print("OK: Semantic View への SELECT を付与しました")'''),
 ORDER BY TOTAL_REVENUE DESC'''),
     md('''### Snowsight で中身を見る（GUI）
 
-1. Snowsight 左メニュー **「AI と ML」→「Cortex Analyst」** を開く
+1. Snowsight 左メニュー **「AI と ML」→「Cortex Analyst」**（または **「Workspaces」の Semantic Studio**）を開く
 2. `CORTEX_QUICK_HOL_DB` の `SALES_OPS_SEMANTIC_VIEW` をクリック
 3. **Logical tables / Relationships / Metrics / Verified queries** を開き、`SALES_OPS_SV_BASIC` と見比べる
 
@@ -639,7 +674,30 @@ FROM {FQ}DOCS_CHUNKS GROUP BY FILE_NAME'''),
 
 > 💡 既定のモデルは英語向けです。日本語で質問する場合は多言語モデルを指定してください（このハンズオンで実際に、既定モデルでは日本語の質問に対して関係の薄い表が上位に来ました）。
 >
-> 作成には 1〜2 分かかります。'''),
+> 作成には 1〜2 分かかります。
+
+### 方法 A：GUI（AI と ML → Cortex Search）で作る
+
+Step 1・2 で作った `DOCS_CHUNKS` テーブルを、画面から検索サービスにします。
+
+1. Snowsight 左メニュー **「AI と ML」→「Cortex Search」** を開き、**「Create」**
+2. ロールは `ACCOUNTADMIN`、ウェアハウスは **`CORTEX_QUICK_HOL_WH`**
+3. データベース / スキーマに `CORTEX_QUICK_HOL_DB` / `CORTEX_QUICK_HOL_SCHEMA`、サービス名に **`SALES_DOCS_SEARCH`**（**大文字のまま**）を入力し、**Next**
+4. データの種類は **Table or view** → **`DOCS_CHUNKS`** を選び、**Next**
+5. 検索結果に含める列：`CHUNK_ID` / `CHUNK` / `FILE_NAME` / `CHUNK_NO` → **Next**
+6. 検索する列：**`CHUNK`** → **Next**
+7. 絞り込みに使う列：**`FILE_NAME`** → **Next**
+8. Target lag は **1 day** にして **Create**
+9. 作成されたら同じ画面の **Playground** で「推奨されるパイプラインカバレッジの目安は？」と検索してみる
+
+> ⚠️ **埋め込みモデル**：画面でモデルを選べない場合、既定の英語向けモデルで作られ、日本語の質問の精度が下がります。
+> その場合は **方法 B のセルを実行**して、多言語モデル（`snowflake-arctic-embed-l-v2.0`）で作り直してください。
+>
+> ⚠️ GUI ではサービス名がダブルクォート付きで作られます。小文字が混じると SQL や Agent から `SALES_DOCS_SEARCH` で参照できなくなるため、**必ず大文字で入力**してください。
+
+> ℹ️ GUI の手順は Snowflake 公式ドキュメントをもとに書いています。画面のラベルや順番が多少違う場合があります。\n> 迷ったら **方法 B（SQL）** のセルを実行すれば、同じ名前・同じ設定で作られます（GUI で作ったものは上書きされます）。
+
+### 方法 B：SQL で作る（`CREATE CORTEX SEARCH SERVICE`）'''),
     sql("create_search_service", f'''CREATE OR REPLACE CORTEX SEARCH SERVICE {FQ}SALES_DOCS_SEARCH
   ON CHUNK
   ATTRIBUTES FILE_NAME
@@ -647,6 +705,7 @@ FROM {FQ}DOCS_CHUNKS GROUP BY FILE_NAME'''),
   TARGET_LAG = '1 day'
   EMBEDDING_MODEL = 'snowflake-arctic-embed-l-v2.0'
   AS SELECT CHUNK_ID, CHUNK, FILE_NAME, CHUNK_NO FROM {FQ}DOCS_CHUNKS'''),
+    md("GUI・SQL どちらで作った場合も、次のセルで権限を付けます。"),
     py('''session.sql(f"GRANT USAGE ON CORTEX SEARCH SERVICE {DB}.{SCHEMA}.SALES_DOCS_SEARCH TO ROLE {HOL_ROLE}").collect()
 print("OK: Cortex Search Service への USAGE を付与しました")'''),
     md('''## Step 4. 検索してみる
@@ -665,9 +724,7 @@ search_docs("推奨されるパイプラインカバレッジの目安は？")''
     py('search_docs("停滞している商談にはどう対応すべき？")'),
     py('search_docs("解約リスクが高い顧客に共通する特徴は？")'),
     md('''> ✅ それぞれの質問に、関係する段落（推奨 1.6 倍、役員スポンサーの関与、技術的なエスカレーションなど）が上位に返れば成功です。
->
-> 💡 **GUI でも作れます**：Snowsight の **「AI と ML」→「Cortex Search」→「作成」** から、ステージ上の PDF を選ぶだけで、テキスト抽出・分割・インデックス作成までを一気に行えます。
-> 作成したサービスは同じ画面の **Playground** で検索を試せます。'''),
+'''),
     md('''✅ 03 はここまでです。次は `04_cortex_agent.ipynb` で、Analyst と Search を 1 つの Agent にまとめます。'''),
 ]
 
@@ -688,9 +745,9 @@ nb_agent = [
 **所要時間**：約15分'''),
     md("## Step 0. セッションの準備"),
     py(SETUP),
-    md('''## Step 1. Agent を SQL で作る
+    md('''## Step 1. Agent を作る
 
-| spec の項目 | 内容 |
+| 設定（SQL の spec の項目） | 内容 |
 |---|---|
 | `models.orchestration` | 使うモデル。`auto` で Snowflake が自動選択 |
 | `instructions.orchestration` | **ツールの使い分けの指示**。数字は Analyst、推奨・方針は Search、比較は両方 |
@@ -702,7 +759,34 @@ nb_agent = [
 > 位置が違うと、作成時に `unrecognized field execution_environment`、実行時に `missing an execution environment` になります。
 
 > ⚠️ **ハマりどころ②：作り直すと権限が消える**
-> `CREATE OR REPLACE` は既存の GRANT を引き継ぎません（検証したアカウントでは `CREATE AGENT ... COPY GRANTS` が構文エラーでした）。そのため作成直後に権限を付け直しています。'''),
+> `CREATE OR REPLACE` は既存の GRANT を引き継ぎません（検証したアカウントでは `CREATE AGENT ... COPY GRANTS` が構文エラーでした）。そのため作成直後に権限を付け直しています。
+
+### 方法 A：GUI（AI と ML → Agents）で作る
+
+1. Snowsight 左メニュー **「AI と ML」→「Agents」** を開き、**「Create agent」**
+2. データベース / スキーマに `CORTEX_QUICK_HOL_DB` / `CORTEX_QUICK_HOL_SCHEMA`、**Agent object name** に **`SALES_OPS_AGENT`**、**Display name** に `Sales Ops Agent` を入力し、**Create agent**
+3. 作成した Agent を開き、**「Edit」**
+4. **Tools** → **Cortex Analyst** の **「+ Add」**
+   - Name：`sales_ops_analyst`
+   - Semantic view：**`SALES_OPS_SEMANTIC_VIEW`**（02 の v2）
+   - Warehouse：**`CORTEX_QUICK_HOL_WH`**
+   - Description：下の SQL の `sales_ops_analyst` の description を貼り付け → **Add**
+5. **Tools** → **Cortex Search Services** の **「+ Add」**
+   - Name：`sales_docs_search`
+   - Search service：**`SALES_DOCS_SEARCH`**（03）
+   - ID column：`CHUNK_ID`、Title column：`FILE_NAME`
+   - Description：下の SQL の `sales_docs_search` の description を貼り付け → **Add**
+6. **Orchestration**
+   - Orchestration model：`auto`
+   - Planning instructions：下の SQL の `orchestration:` の文章を貼り付け
+   - Response instruction：下の SQL の `response:` の文章を貼り付け（**日本語で答える指示**が入っています）
+7. **Save**。右側のチャット欄で「停滞商談は何件？」と聞いて、回答が返ることを確認する
+
+> 💡 ここで画面に入力した内容は、下の SQL の spec と 1 対 1 で対応しています。SQL を見比べると「GUI の設定＝spec の YAML」であることが分かります。
+
+> ℹ️ GUI の手順は Snowflake 公式ドキュメントをもとに書いています。画面のラベルや順番が多少違う場合があります。\n> 迷ったら **方法 B（SQL）** のセルを実行すれば、同じ名前・同じ設定で作られます（GUI で作ったものは上書きされます）。
+
+### 方法 B：SQL で作る（`CREATE AGENT`）'''),
     sql("create_agent", '''CREATE OR REPLACE AGENT CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_AGENT
   COMMENT = 'Sales Operations agent (Cortex Analyst + Cortex Search)'
   FROM SPECIFICATION $$
@@ -750,6 +834,7 @@ nb_agent = [
       title_column: FILE_NAME
       id_column: CHUNK_ID
   $$'''),
+    md("GUI・SQL どちらで作った場合も、次のセルで権限を付けます（Quick からはハンズオン用ロールで実行されるため）。"),
     py('''session.sql(f"GRANT USAGE ON AGENT {DB}.{SCHEMA}.SALES_OPS_AGENT TO ROLE {HOL_ROLE}").collect()
 print("OK: Agent への USAGE を付与しました")'''),
     sql("show_agent_grants", "SHOW GRANTS ON AGENT CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_AGENT"),
@@ -783,7 +868,7 @@ finally:
     session.use_role("ACCOUNTADMIN")'''),
     md('''## Step 3. Agent Studio で確認・編集する（GUI）
 
-SQL で作った Agent は、Snowsight の画面からも確認・編集できます。
+作った Agent は、Snowsight の画面から確認・編集できます（方法 A で作った場合は、作成時の画面と同じです）。
 
 1. Snowsight 左メニュー **「AI と ML」→「Agents」**（Agent Studio）を開く
 2. `SALES_OPS_AGENT` をクリック
@@ -1021,6 +1106,13 @@ else:
 
 
 OUT.mkdir(parents=True, exist_ok=True)
+
+# GUI（Semantic View Autopilot）でアップロードする用に、v2 の YAML を書き出す
+_yaml = SV_CELL.split("$$")[1].strip() + "\n"
+_sv_dir = HERE.parent / "semantic_views"
+_sv_dir.mkdir(exist_ok=True)
+(_sv_dir / "sales_ops_semantic_view.yaml").write_text(_yaml)
+print("wrote semantic_views/sales_ops_semantic_view.yaml", len(_yaml.splitlines()), "lines")
 for old in ["01_data_setup.ipynb", "02_semantic_view_and_agent.ipynb", "03_mcp_and_oauth.ipynb"]:
     (OUT / old).unlink(missing_ok=True)
 save("01_explore_data.ipynb", nb1)
