@@ -1,7 +1,7 @@
 # Amazon Quick 側の設定ガイド
 
 AWS Workshop「AI-Powered Conversations with your Data Using Amazon Quick and Snowflake via MCP」6章・7章の日本語版です。
-ハンズオンで詰まりやすい点（トライアルアカウント、リージョン、Flow のプロンプト）を修正・補足しています。
+ハンズオンで詰まりやすい点（リージョン、Flow のプロンプト）を修正・補足しています。
 
 > 💡 画面は日本語 UI のものです。英語 UI の場合は括弧内の英語表記を目印にしてください。
 
@@ -21,7 +21,7 @@ AWS Workshop「AI-Powered Conversations with your Data Using Amazon Quick and Sn
 | 確認すること | 理由 |
 |---|---|
 | **AWS コンソールのリージョンが US West (Oregon) `us-west-2` または US East (N. Virginia) `us-east-1`** | Snowflake の OAuth 連携には両リージョンのコールバック URL（`https://us-west-2.quicksight.aws.amazon.com/sn/oauthcallback` / `https://us-east-1.quicksight.aws.amazon.com/sn/oauthcallback`）を登録しています。それ以外のリージョンで Quick を作るとログイン後にリダイレクトエラーになります（その場合は 05 の `QUICK_REGIONS` にリージョンを追加して OAuth 連携を作り直してください）。 |
-| **Snowflake のユーザー名とパスワードを手元に用意** | Quick から Snowflake にログインするときに使います（トライアルにサインアップしたユーザー）。 |
+| **Snowflake のユーザー名とパスワードを手元に用意** | Quick から Snowflake にログインするときに使います（Notebook を実行したユーザー）。 |
 | **05 の Step 3 を実行済み（DEFAULT_ROLE = `CORTEX_QUICK_HOL_ROLE`）** | DEFAULT_ROLE が ACCOUNTADMIN のままだと、OAuth ログインが拒否されます。 |
 | **Client secret はコピー直前に表示** | 05 の Step 5 で `SHOW_SECRET = True` にして実行し、貼り付けたら `False` に戻します。画面共有に注意してください。 |
 
@@ -122,7 +122,7 @@ AWS Workshop「AI-Powered Conversations with your Data Using Amazon Quick and Sn
     ![コネクタの詳細（準備完了）](../images/quick/ch6/17.png)
 
 > 🔐 **Snowflake へのサインイン**：初めてコネクタを使うとき（手順 4 の「試してみる」やチャット）に「サインインしますか？」と表示されます。**はい** をクリックすると Snowflake のサインイン画面が開くので、**Snowflake のユーザー名とパスワード**でサインインし、ロールが **`CORTEX_QUICK_HOL_ROLE`** であることを確認して **Allow** をクリックします。サインイン後、コネクタの詳細に **サインインしました** と表示されます。
-> - ここで `ACCOUNTADMIN` と表示される、またはログインが拒否される場合は、05 の Step 3 が反映されていません（[トラブルシュート](troubleshooting_ja.md#oauth-ログイン)）。
+> - ここで `ACCOUNTADMIN` と表示される、またはログインが拒否される場合は、05 の Step 3 が反映されていません。
 
 ## 4. コネクタをテストする
 
@@ -333,4 +333,3 @@ Flow は、複数のシステムを跨ぐような複雑な操作を実行でき
 - **Snowflake 側**：`05_mcp_and_oauth.ipynb` 末尾のクリーンアップセルを使います。DEFAULT_ROLE を戻す場合は `RESTORE_DEFAULT_ROLE = "ACCOUNTADMIN"` にします。
 - **Quick 側**：Flow → Chat Agent → Space → コネクタの順に削除します。ハンズオン用の AWS アカウントはイベント終了後に自動で削除されます。
 
-困ったときは [troubleshooting_ja.md](troubleshooting_ja.md) を参照してください。

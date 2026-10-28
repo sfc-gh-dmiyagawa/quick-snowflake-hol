@@ -199,10 +199,6 @@ def sql(name, s):
             "outputs": [], "source": _lines(f"%%sql -r {name}\n{s}")}
 
 
-def fig(label, desc):
-    return md(f"> 🖼️ **図の差し込み位置：{label}**  \n> {desc}  \n> （画像は `images/` に置き、`![{label}](../images/xxx.png)` で差し込んでください）")
-
-
 def save(name, cells):
     nb = {"cells": cells, "metadata": META, "nbformat": 4, "nbformat_minor": 5}
     (OUT / name).write_text(json.dumps(nb, ensure_ascii=False, indent=1))
@@ -220,7 +216,7 @@ session.use_warehouse(HOL_WH)
 session.use_schema(f"{DB}.{SCHEMA}")
 print("ロール:", session.get_current_role(), "/ ウェアハウス:", session.get_current_warehouse())'''
 
-PREFLIGHT_MD = '### 事前チェック：AI 機能とクロスリージョン推論\n\n後半（Agent / Quick 連携）で詰まらないよう、**最初に** AI 機能が使えるかを確かめます。\n\n- `CORTEX_ENABLED_CROSS_REGION` は、アカウントのリージョンに必要なモデルがないときに他リージョンで推論する設定です。トライアルのリージョンによっては Agent のモデルが見つからないため、`setup.sql` で `ANY_REGION` にしています（データ自体は移動しません）。ここでは値を確認するだけです。\n- `AI_COMPLETE` を1回だけ呼び、トライアルの AI 制限にかかっていないかを確認します（数文字の応答なので消費はごくわずかです）。\n\n> ❌ `not available for trial accounts` / `Access denied for trial accounts` が出た場合、この先の Agent は動きません。\n> 上の「トライアルアカウントの注意」のとおりクレジットカードを登録し、このセルを再実行してください。'
+PREFLIGHT_MD = '### 事前チェック：AI 機能とクロスリージョン推論\n\n後半（Agent / Quick 連携）で詰まらないよう、**最初に** AI 機能が使えるかを確かめます。\n\n- `CORTEX_ENABLED_CROSS_REGION` は、アカウントのリージョンに必要なモデルがないときに他リージョンで推論する設定です。アカウントのリージョンによっては Agent のモデルが見つからないため、`setup.sql` で `ANY_REGION` にしています（データ自体は移動しません）。ここでは値を確認するだけです。\n- `AI_COMPLETE` を1回だけ呼び、AI 機能が使えるかを確認します（数文字の応答なので消費はごくわずかです）。'
 PREFLIGHT_PY = '''v = session.sql("SHOW PARAMETERS LIKE 'CORTEX_ENABLED_CROSS_REGION' IN ACCOUNT").collect()
 print("CORTEX_ENABLED_CROSS_REGION:", v[0]["value"] if v else "(不明)", "（setup.sql で ANY_REGION に設定済み）")
 
@@ -229,10 +225,6 @@ try:
     print("OK: AI 機能が使えます（応答:", str(r).strip()[:20], "）")
 except Exception as e:
     msg = str(e)
-    if "trial" in msg.lower():
-        raise RuntimeError(
-            "このトライアルアカウントでは AI 機能が無効です。Admin » Billing » Payment method でクレジットカードを登録してから、"
-            "このセルを再実行してください。（イベント用 URL で作ったアカウントでは通常発生しません）") from None
     print("⚠️ AI_COMPLETE の呼び出しに失敗しました。モデル名の問題の可能性があります（Agent の動作は 04 で確認します）:\\n", msg[:300])'''
 
 
@@ -288,14 +280,7 @@ Amazon Quick × Snowflake ハンズオン（Snowflake 編）の 1 本目です�
 {INTRO_TABLE}
 
 **前提**：`load.sql` と `setup.sql` を実行済みであること  
-**所要時間**：約10分
-
-### Notebook を開く前に（トライアルアカウントの注意）
-
-| 確認すること | 理由 |
-|---|---|
-| **AI 機能が有効なトライアルか** | 通常のセルフサービストライアルでは Cortex の AI 機能が**既定で無効**です（`not available for trial accounts`）。イベント用のサインアップ URL で作ったアカウントか、**Admin » Billing でクレジットカードを登録**したアカウントを使ってください（カード登録後も残りの無償クレジットはそのまま使えます）。Step 0 で自動チェックします。 |
-| **コンピュートプールは `SYSTEM_COMPUTE_POOL_CPU`** | トライアルではコンピュートプールを新規作成できません。Notebook の接続時に既定の CPU プールを選んでください。 |'''),
+**所要時間**：約10分'''),
     md('''## シナリオ
 
 あなたは SaaS 企業の**営業企画（Sales Operations）の担当者**です。
@@ -307,7 +292,6 @@ Amazon Quick × Snowflake ハンズオン（Snowflake 編）の 1 本目です�
 
 数字は Snowflake のテーブルに、**社内の基準や推奨アクションは PDF のレポート**に書かれています。
 このハンズオンでは、両方をまたいで自然言語で答える **Cortex Agent** を作り、最後に **Amazon Quick** から使えるようにします。'''),
-    fig("全体アーキテクチャ", "6テーブル → Semantic View → Cortex Analyst ／ PDF → Cortex Search → Cortex Agent → MCP Server → OAuth → Amazon Quick"),
     md('''## Step 0. セッションの準備と事前チェック
 
 このハンズオンで使う名前を変数にまとめ、AI 機能が使えるかを最初に確かめます。'''),
@@ -335,7 +319,6 @@ UNION ALL SELECT 'PRODUCT_CATALOG_TABLE',        COUNT(*) FROM {FQ}PRODUCT_CATAL
 UNION ALL SELECT 'SALES_REP_PERFORMANCE_TABLE',  COUNT(*) FROM {FQ}SALES_REP_PERFORMANCE_TABLE
 UNION ALL SELECT 'SALES_PIPELINE_OPPORTUNITIES', COUNT(*) FROM {FQ}SALES_PIPELINE_OPPORTUNITIES
 UNION ALL SELECT 'MARKETING_ATTRIBUTION_TABLE',  COUNT(*) FROM {FQ}MARKETING_ATTRIBUTION_TABLE'''),
-    fig("テーブル関係図（ER図）", "取引が CUSTOMER_ID / PRODUCT_SKU / SALES_REP_ID で顧客・製品・営業担当につながる。パイプラインとマーケティングは独立"),
     md('''### 中身を見てみる
 
 取引と商談を数行ずつ表示します。どんなカラムにどんな値が入っているかを眺めてください。'''),
@@ -405,7 +388,6 @@ nb2 = [
 
 **前提**：`01_explore_data.ipynb` を実行済みであること  
 **所要時間**：約20分'''),
-    fig("Cortex Analyst の仕組み", "質問 → Cortex Analyst（Semantic View を参照して SQL 生成）→ ウェアハウスで実行 → 結果"),
     md("## Step 0. セッションの準備"),
     py(SETUP),
     md('''## Step 1. Semantic View とは
@@ -479,7 +461,6 @@ v1 に次を加えた改善版を、YAML 形式で作ります（`SYSTEM$CREATE_
 | `WIN_RATE_PCT` | 受注 ÷（受注＋失注）× 100 | 社内の定義 |
 | `REPS_BELOW_COVERAGE_TARGET` | パイプラインカバレッジ **1.6 倍未満** の営業担当数 | Sales Performance レポート |
 | `EXPANSION_TARGET_CUSTOMERS` | 解約リスク **30 未満** かつ拡大余地 High/Medium の顧客数 | 社内の定義 |'''),
-    fig("Semantic View v2 の構成", "7つの論理テーブル、3本のリレーション、社内 KPI のメトリクス、検証済みクエリ"),
     sql("create_semantic_view", SV_CELL),
     md("作成できたか確認し、ハンズオン用ロールに参照権限を付けます。"),
     sql("show_semantic_views", "SHOW SEMANTIC VIEWS IN SCHEMA CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA"),
@@ -508,7 +489,6 @@ ORDER BY TOTAL_REVENUE DESC'''),
 3. **Logical tables / Relationships / Metrics / Verified queries** を開き、`SALES_OPS_SV_BASIC` と見比べる
 
 > Semantic View の編集画面から、同義語や検証済みクエリを GUI で追加することもできます。'''),
-    fig("Cortex Analyst の Semantic View 画面", "SALES_OPS_SEMANTIC_VIEW の Metrics に STALLED_DEAL_COUNT などが並んでいる画面"),
     md('''## Step 4. 正答率を比べる（v1 vs v2）
 
 同じ 9 問を v1・v2 それぞれに投げ、**Analyst が生成した SQL を実行して、結果に正解の値が含まれるか**で自動採点します。
@@ -625,7 +605,6 @@ Cortex Search Service `SALES_DOCS_SEARCH` → 04 で Agent のツールにする
 
 **前提**：`02_cortex_analyst.ipynb` を実行済みであること  
 **所要時間**：約10分'''),
-    fig("Cortex Search の処理の流れ", "PDF → テキスト抽出 → チャンク分割 → 検索インデックス → 質問に近いチャンクを返す"),
     md("## Step 0. セッションの準備"),
     py(SETUP),
     md('''## Step 1. PDF からテキストを取り出す
@@ -689,7 +668,6 @@ search_docs("推奨されるパイプラインカバレッジの目安は？")''
 >
 > 💡 **GUI でも作れます**：Snowsight の **「AI と ML」→「Cortex Search」→「作成」** から、ステージ上の PDF を選ぶだけで、テキスト抽出・分割・インデックス作成までを一気に行えます。
 > 作成したサービスは同じ画面の **Playground** で検索を試せます。'''),
-    fig("Cortex Search の Playground", "SALES_DOCS_SEARCH に日本語で質問し、PDF のチャンクが返っている画面"),
     md('''✅ 03 はここまでです。次は `04_cortex_agent.ipynb` で、Analyst と Search を 1 つの Agent にまとめます。'''),
 ]
 
@@ -708,7 +686,6 @@ nb_agent = [
 
 **前提**：`03_cortex_search.ipynb` を実行済みであること  
 **所要時間**：約15分'''),
-    fig("Agent の処理の流れ", "質問 → Agent が計画 → Analyst（数字）／Search（文書）を呼ぶ → 結果を統合して回答"),
     md("## Step 0. セッションの準備"),
     py(SETUP),
     md('''## Step 1. Agent を SQL で作る
@@ -819,10 +796,7 @@ SQL で作った Agent は、Snowsight の画面からも確認・編集でき�
 > ⚠️ GUI で編集した後に、このNotebookの `create_agent` セルを再実行すると、**GUI の変更は上書きされます**。
 
 > 💡 **Snowflake Intelligence でも使えます**：Snowsight 左メニュー **「AI と ML」→「Snowflake Intelligence」** で `SALES_OPS_AGENT` を選ぶと、チャット画面から同じ Agent に質問できます（02 で `use_as_onboarding_question: true` にした質問が候補に出ます）。'''),
-    fig("Agent Studio の Configuration 画面", "SALES_OPS_AGENT の Tools に Cortex Analyst と Cortex Search の 2 つが並んでいる画面"),
     md('''> ✅ すべての質問に回答が返り、質問 4・5 で 2 つのツールが使われていれば成功です。
->
-> ❌ `Access denied for trial accounts`（399504）が出た場合は、トライアルの AI 制限です。01 の「トライアルアカウントの注意」を参照してください。
 
 次は `05_mcp_and_oauth.ipynb` に進みます。'''),
 ]
@@ -840,7 +814,6 @@ nb5 = [
 | OAuth 連携 `SALES_OPS_QUICK_SUITE_OAUTH` | Quick のユーザーが Snowflake にログインするための仕組み |
 
 **前提**：`04_cortex_agent.ipynb` を最後まで実行済みであること'''),
-    fig("Quick から Snowflake への接続の流れ", "Quick（Chat Agent / Flow）→ OAuth ログイン → MCP Server → Cortex Agent → Cortex Analyst（Semantic View）／ Cortex Search（PDF）。返るのは結果のみ"),
     md("## Step 0. セッションの準備"),
     py(SETUP + '''
 
@@ -893,16 +866,16 @@ for obj in ["MCP SERVER", "AGENT", "SEMANTIC VIEW", "CORTEX SEARCH SERVICE"]:
 
 Quick から OAuth でログインしたとき、Snowflake は **そのユーザーのデフォルトロール／デフォルトウェアハウス** で処理します。
 
-> ⚠️ **ハマりどころ③：トライアルのユーザーは既定ロールが ACCOUNTADMIN**
+> ⚠️ **ハマりどころ③：既定ロールが ACCOUNTADMIN のままだと接続できない**
 > - Quick からの処理は、セッションで切り替えたロールではなく **DEFAULT_ROLE** で行われます。
-> - トライアルでサインアップしたユーザーの DEFAULT_ROLE は **ACCOUNTADMIN** です。ACCOUNTADMIN / SECURITYADMIN / ORGADMIN は OAuth でのログインが**ブロック**されるため、このままでは Quick から接続できません。
+> - アカウント作成時の管理ユーザーは、DEFAULT_ROLE が **ACCOUNTADMIN** になっていることがあります。ACCOUNTADMIN / SECURITYADMIN / ORGADMIN は OAuth でのログインが**ブロック**されるため、このままでは Quick から接続できません。
 > - そこで、Quick でログインするユーザー（＝今このNotebookを実行しているユーザー）の DEFAULT_ROLE を `CORTEX_QUICK_HOL_ROLE` に変えます。
 
 > 💡 変更後も、Snowsight 右上のロール切り替えや `USE ROLE ACCOUNTADMIN` で管理者として作業できます（次回ログイン時の初期ロールが変わるだけです）。
 > このNotebookも各セルで `ACCOUNTADMIN` に切り替えて実行しているので影響ありません。元に戻す方法は末尾のクリーンアップを参照してください。
 
 > 💡 **ハマりどころ④：ALLOWED_INTERFACES**
-> ユーザーの `ALLOWED_INTERFACES` が `SNOWFLAKE_INTELLIGENCE` などに制限されていると、Quick の OAuth ログイン自体は成功するのに MCP 呼び出しが 401（`395300 Not authorized to access interface ALL`）になり、**Quick がログイン画面を繰り返し表示**します。トライアルの既定値（`ALL`）なら問題ありませんが、念のため下のセルで確認し、必要なら `ALL` に戻します。'''),
+> ユーザーの `ALLOWED_INTERFACES` が `SNOWFLAKE_INTELLIGENCE` などに制限されていると、Quick の OAuth ログイン自体は成功するのに MCP 呼び出しが 401（`395300 Not authorized to access interface ALL`）になり、**Quick がログイン画面を繰り返し表示**します。既定値（`ALL`）なら問題ありませんが、念のため下のセルで確認し、必要なら `ALL` に戻します。'''),
     py('''before = {r["property"]: r["value"] for r in session.sql(f'DESC USER "{hol_user}"').collect()
           if r["property"] in ("DEFAULT_ROLE", "DEFAULT_WAREHOUSE")}
 print("変更前:", before)
@@ -958,7 +931,7 @@ print("OK: SALES_OPS_QUICK_SUITE_OAUTH を作成しました")'''),
 > ⚠️ **Client Secret は画面共有で見せないよう注意してください。** 既定では伏せ字で表示し、`SHOW_SECRET = True` にしたときだけ全文を表示します。
 > Quick に貼り付けるときだけ `True` にして実行し、貼り付け後は `False` に戻して再実行してください。
 
-> 💡 Quick で OAuth ログイン画面が出たら、**このトライアルアカウントのユーザー名とパスワード**でログインします（MFA を登録済みならその確認も求められます）。'''),
+> 💡 Quick で OAuth ログイン画面が出たら、**この Snowflake アカウントのユーザー名とパスワード**でログインします（MFA を登録済みならその確認も求められます）。'''),
     py('''import json
 SHOW_SECRET = False
 
@@ -989,7 +962,6 @@ for k, v in quick_settings.items():
 | Quick で 424 / タイムアウト | MCP の呼び出しは 60 秒で打ち切り | 質問を簡単にする、検証済みクエリを増やす |
 | Quick がログイン画面を繰り返す（401） | ユーザーの `ALLOWED_INTERFACES` が制限されている | Step 3 のセルで `ALL` に戻す |
 | Quick のログインで `invalid_client` | Client ID / Secret の貼り間違い、または OAuth 連携を作り直した | Step 5 の値を貼り直す |
-| `Access denied for trial accounts` | トライアルの AI 機能が無効 | クレジットカードを登録（01 冒頭参照） |
 | Quick で Snowflake の URL エラー | アカウント名の `_` をそのまま使っている | Step 5 で表示された URL（`-` に置換済み）を使う |'''),
     py('''print("=== OAuth 連携")
 for r in session.sql("DESCRIBE SECURITY INTEGRATION SALES_OPS_QUICK_SUITE_OAUTH").collect():
@@ -1022,7 +994,7 @@ DB・ウェアハウス・ロールまで消す場合は `DROP_BASE_OBJECTS = Tr
 既定ロールを変更した場合は、`RESTORE_DEFAULT_ROLE` に元のロール名を入れると戻せます。'''),
     py('''RUN_CLEANUP = False
 DROP_BASE_OBJECTS = False
-RESTORE_DEFAULT_ROLE = None   # 例: "ACCOUNTADMIN"（トライアルの初期値）
+RESTORE_DEFAULT_ROLE = None   # 例: "ACCOUNTADMIN"（変更前のロール）
 
 if RUN_CLEANUP:
     session.use_role("ACCOUNTADMIN")

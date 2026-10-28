@@ -1,6 +1,6 @@
 # Amazon Quick × Snowflake ハンズオン（Notebook 版）
 
-Snowflake の **Cortex Analyst・Cortex Search・Cortex Agent** を一から組み立て、最後に **Amazon Quick** から自然言語で使えるようにするハンズオンです。**Snowflake のトライアルアカウント**で実施できます。
+Snowflake の **Cortex Analyst・Cortex Search・Cortex Agent** を一から組み立て、最後に **Amazon Quick** から自然言語で使えるようにするハンズオンです。
 
 元教材（Snowflake クイックスタート「Build Conversational Analytics with Amazon Quick and Snowflake MCP」/ AWS Workshop Studio）では、Cortex Code のスキルが Snowflake 側をまとめて自動構築します。
 このリポジトリでは、その処理を Notebook に分けました。上から実行しながら「何が作られているか」を確認できます。さらに次の2つを加えています。
@@ -26,15 +26,10 @@ PDF レポート（S3）→ Cortex Search ────────────�
 | [`notebooks/04_cortex_agent.ipynb`](notebooks/04_cortex_agent.ipynb) | **Cortex Agent**：Analyst と Search を使い分ける Agent（SQL で作成し、Agent Studio で確認） | 約15分 |
 | [`notebooks/05_mcp_and_oauth.ipynb`](notebooks/05_mcp_and_oauth.ipynb) | MCP Server・OAuth の作成、Quick 用のユーザー設定、Quick に入力する値の表示 | 約10分 |
 | [`docs/02_quick_setup_guide_ja.md`](docs/02_quick_setup_guide_ja.md) | Amazon Quick 側：コネクタ・Space・Chat Agent・Flow | 約40分 |
-| [`docs/troubleshooting_ja.md`](docs/troubleshooting_ja.md) | よくあるエラーと対処 | － |
-| [`docs/01_snowflake_overview_ja.md`](docs/01_snowflake_overview_ja.md) | 元教材のスキルとの対応表、変更点 | － |
 
 ## 必要なもの
 
-- **Snowflake トライアルアカウント**（Enterprise エディション、AWS リージョン推奨）
-  - ⚠️ 通常のセルフサービストライアルでは、Cortex の AI 機能が**既定で無効**です。
-  - イベント用のサインアップ URL で作ったアカウントを使うか、**Admin » Billing でクレジットカードを登録**してください。カードを登録しても、残りの無償クレジットはそのまま使えます。
-  - 使えるかどうかは、01 の最初のセルで確認できます。
+- **Snowflake アカウント**（Cortex の AI 機能が使えるもの。AWS リージョン推奨）
 - **AWS アカウント**（Amazon Quick を **us-west-2（Oregon）または us-east-1（N. Virginia）** で使えること）
 
 ## 進め方
@@ -54,7 +49,7 @@ PDF レポート（S3）→ Cortex Search ────────────�
 5. `02` → `03` → `04` → `05` の順に、同じように実行します。05 の Step 5 に、Quick に入力する値が表示されます。
 6. [`docs/02_quick_setup_guide_ja.md`](docs/02_quick_setup_guide_ja.md) に沿って、Quick 側を設定します。
 
-> 💡 05 の Step 3 で、実行ユーザーの **DEFAULT_ROLE をハンズオン用ロールに変更**します。トライアルの初期ロール ACCOUNTADMIN では、Quick から OAuth でログインできないためです。変更後も `USE ROLE ACCOUNTADMIN` で管理者作業はできます。元に戻す方法は 05 の末尾にあります。
+> 💡 05 の Step 3 で、実行ユーザーの **DEFAULT_ROLE をハンズオン用ロールに変更**します。初期ロールが ACCOUNTADMIN のままでは、Quick から OAuth でログインできないためです。変更後も `USE ROLE ACCOUNTADMIN` で管理者作業はできます。元に戻す方法は 05 の末尾にあります。
 
 ## Semantic View の精度向上（02）
 
@@ -83,14 +78,12 @@ v1 が間違えた理由は、次の3種類です。どれも Semantic View に�
 | 項目 | 修正内容 |
 |---|---|
 | 構成 | Cortex Search（PDF）と、Semantic View の精度比較を追加。Agent は Analyst と Search の2つのツールを持つ |
-| トライアル対応 | AI 機能の事前チェック、クロスリージョン推論の有効化、既定のコンピュートプールの案内 |
 | データ | 取引の SKU と製品カタログの SKU が一致せず、製品の結合が0件 → ティア×請求サイクル単位の `PRODUCT_PLAN_VIEW` で結合 |
 | 権限 | テーブル作成前の `GRANT SELECT ON ALL TABLES`、Agent への GRANT 漏れを修正 |
 | Quick 接続 | OAuth のセカンダリロールを `NONE`（推奨設定）、DEFAULT_ROLE・DEFAULT_WAREHOUSE の設定、`ALLOWED_INTERFACES` の確認 |
 | Flow | `CHURN_RISK_SCORE < 0.3`（スコアは0〜100のため0件）を修正、自然言語の質問1回＋Flow 側で計算する形に変更（[Quick ガイド 7章](docs/02_quick_setup_guide_ja.md#7-flow-を作る)） |
 | 日本語化 | 日本語の同義語・検証済みクエリ、日本語で回答する Agent の指示、多言語の埋め込みモデル（英語の PDF を日本語で検索） |
 
-詳細は [`docs/01_snowflake_overview_ja.md`](docs/01_snowflake_overview_ja.md) を参照してください。
 
 ## 作成されるオブジェクト
 
