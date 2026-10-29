@@ -206,7 +206,7 @@ def save(name, cells):
 
 
 SETUP = '''from snowflake.snowpark.context import get_active_session
-session = get_active_session()
+session = get_active_session()   # Notebook がすでに張っている Snowflake への接続を取得
 
 DB, SCHEMA = "CORTEX_QUICK_HOL_DB", "CORTEX_QUICK_HOL_SCHEMA"
 HOL_ROLE, HOL_WH = "CORTEX_QUICK_HOL_ROLE", "CORTEX_QUICK_HOL_WH"
@@ -279,8 +279,7 @@ Amazon Quick × Snowflake ハンズオン（Snowflake 編）の 1 本目です�
 
 {INTRO_TABLE}
 
-**前提**：`load.sql` と `setup.sql` を実行済みであること  
-**所要時間**：約10分'''),
+**前提**：`load.sql` と `setup.sql` を実行済みであること'''),
     md('''## シナリオ
 
 あなたは SaaS 企業の**営業企画（Sales Operations）の担当者**です。
@@ -388,9 +387,12 @@ nb2 = [
 2. 説明・同義語・社内 KPI・検証済みクエリを入れた **改善版（v2）** を作り、
 3. **同じ 9 問の質問で正答率を自動採点**して、改善の効果を数字で確かめます。
 
-**前提**：`01_explore_data.ipynb` を実行済みであること  
-**所要時間**：約20分'''),
-    md("## Step 0. セッションの準備"),
+**前提**：`01_explore_data.ipynb` を実行済みであること'''),
+    md('''## Step 0. セッションの準備
+
+Notebook はそれぞれ別の Python 実行環境で動くため、前の Notebook で作った変数や接続は引き継がれません。
+そこで各 Notebook の最初に、Snowflake への接続（`session`）を取得し、ロール・ウェアハウス・スキーマをそろえます。
+Python のセルから SQL を実行するには、この `session` が必要です。'''),
     py(SETUP),
     md('''## Step 1. Semantic View とは
 
@@ -640,9 +642,12 @@ PDF（DOCS_STAGE。中身は GitHub の data/pdfs/ で見られます）
 Cortex Search Service `SALES_DOCS_SEARCH` → 04 で Agent のツールにする
 ```
 
-**前提**：`02_cortex_analyst.ipynb` を実行済みであること  
-**所要時間**：約10分'''),
-    md("## Step 0. セッションの準備"),
+**前提**：`02_cortex_analyst.ipynb` を実行済みであること'''),
+    md('''## Step 0. セッションの準備
+
+Notebook はそれぞれ別の Python 実行環境で動くため、前の Notebook で作った変数や接続は引き継がれません。
+そこで各 Notebook の最初に、Snowflake への接続（`session`）を取得し、ロール・ウェアハウス・スキーマをそろえます。
+Python のセルから SQL を実行するには、この `session` が必要です。'''),
     py(SETUP),
     md('''## Step 1. PDF からテキストを取り出す
 
@@ -654,7 +659,15 @@ FROM DIRECTORY(@{FQ}DOCS_STAGE)'''),
     sql("show_parsed", f'''SELECT FILE_NAME, LENGTH(CONTENT) AS CHARS, LEFT(CONTENT, 500) AS HEAD FROM {FQ}DOCS_PARSED'''),
     md('''## Step 2. チャンクに分割する
 
-文書全体を 1 件として検索すると、関係ない部分まで混ざって精度が下がります。約 800 文字ずつ（前後 100 文字は重ねて）に分割します。
+PDF 1 本を丸ごと 1 件として登録せず、短い「チャンク」に分けてから検索サービスに入れます。理由は 3 つです。
+
+| 理由 | 内容 |
+|---|---|
+| ベクトル化できる長さに上限がある | 埋め込みモデルが一度に読めるのは約 512 トークンまでです。それを超えた部分はベクトル検索の対象から外れてしまいます |
+| 検索の精度が上がる | 1 件の中に話題がたくさん混ざると、質問との「意味の近さ」がぼやけます。話題ごとに分けると、関係する段落だけが上位に来ます |
+| Agent に渡す量が適切になる | Agent は検索結果を読んで回答を作ります。PDF 全体ではなく関係する段落だけを渡すほうが、回答が正確で速くなります |
+
+ここでは約 800 文字ずつ（前後 100 文字は重ねて、文の途中で切れても前後の文脈が残るように）分割します。
 `'markdown'` を指定すると、見出しや段落の切れ目を優先して分割します。'''),
     sql("chunk_docs", f'''CREATE OR REPLACE TABLE {FQ}DOCS_CHUNKS AS
 SELECT d.FILE_NAME || '#' || c.INDEX AS CHUNK_ID,
@@ -743,9 +756,12 @@ nb_agent = [
 
 **両方を使うと**、「レポートの推奨値を、実際のデータが満たしているか」のような質問に 1 回で答えられます。
 
-**前提**：`03_cortex_search.ipynb` を実行済みであること  
-**所要時間**：約15分'''),
-    md("## Step 0. セッションの準備"),
+**前提**：`03_cortex_search.ipynb` を実行済みであること'''),
+    md('''## Step 0. セッションの準備
+
+Notebook はそれぞれ別の Python 実行環境で動くため、前の Notebook で作った変数や接続は引き継がれません。
+そこで各 Notebook の最初に、Snowflake への接続（`session`）を取得し、ロール・ウェアハウス・スキーマをそろえます。
+Python のセルから SQL を実行するには、この `session` が必要です。'''),
     py(SETUP),
     md('''## Step 1. Agent を作る
 
@@ -755,13 +771,6 @@ nb_agent = [
 | `instructions.orchestration` | **ツールの使い分けの指示**。数字は Analyst、推奨・方針は Search、比較は両方 |
 | `instructions.response` | 回答の書き方。日本語の質問には日本語で答える |
 | `tools` / `tool_resources` | 2 つのツールと、それぞれの参照先（Semantic View、Search Service） |
-
-> ⚠️ **ハマりどころ①：ウェアハウスの指定位置**
-> Analyst の `execution_environment` は spec のトップではなく、**`tool_resources.<ツール名>` の中**に書きます。
-> 位置が違うと、作成時に `unrecognized field execution_environment`、実行時に `missing an execution environment` になります。
-
-> ⚠️ **ハマりどころ②：作り直すと権限が消える**
-> `CREATE OR REPLACE` は既存の GRANT を引き継ぎません（検証したアカウントでは `CREATE AGENT ... COPY GRANTS` が構文エラーでした）。そのため作成直後に権限を付け直しています。
 
 ### 方法 A：GUI（AI と ML → Agents）で作る
 
@@ -836,7 +845,7 @@ nb_agent = [
       title_column: FILE_NAME
       id_column: CHUNK_ID
   $$'''),
-    md("GUI・SQL どちらで作った場合も、次のセルで権限を付けます（Quick からはハンズオン用ロールで実行されるため）。"),
+    md("GUI・SQL どちらで作った場合も、次のセルで権限を付けます（Quick からはハンズオン用ロールで実行されるため）。Agent を作り直すと権限は消えるので、そのたびに実行してください。"),
     py('''session.sql(f"GRANT USAGE ON AGENT {DB}.{SCHEMA}.SALES_OPS_AGENT TO ROLE {HOL_ROLE}").collect()
 print("OK: Agent への USAGE を付与しました")'''),
     sql("show_agent_grants", "SHOW GRANTS ON AGENT CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_AGENT"),
@@ -901,7 +910,11 @@ nb5 = [
 | OAuth 連携 `SALES_OPS_QUICK_SUITE_OAUTH` | Quick のユーザーが Snowflake にログインするための仕組み |
 
 **前提**：`04_cortex_agent.ipynb` を最後まで実行済みであること'''),
-    md("## Step 0. セッションの準備"),
+    md('''## Step 0. セッションの準備
+
+Notebook はそれぞれ別の Python 実行環境で動くため、前の Notebook で作った変数や接続は引き継がれません。
+そこで各 Notebook の最初に、Snowflake への接続（`session`）を取得し、ロール・ウェアハウス・スキーマをそろえます。
+Python のセルから SQL を実行するには、この `session` が必要です。'''),
     py(SETUP + '''
 
 # Quick のリージョン（OAuth のリダイレクト先と完全一致させる必要があります）
@@ -953,16 +966,14 @@ for obj in ["MCP SERVER", "AGENT", "SEMANTIC VIEW", "CORTEX SEARCH SERVICE"]:
 
 Quick から OAuth でログインしたとき、Snowflake は **そのユーザーのデフォルトロール／デフォルトウェアハウス** で処理します。
 
-> ⚠️ **ハマりどころ③：既定ロールが ACCOUNTADMIN のままだと接続できない**
-> - Quick からの処理は、セッションで切り替えたロールではなく **DEFAULT_ROLE** で行われます。
-> - アカウント作成時の管理ユーザーは、DEFAULT_ROLE が **ACCOUNTADMIN** になっていることがあります。ACCOUNTADMIN / SECURITYADMIN / ORGADMIN は OAuth でのログインが**ブロック**されるため、このままでは Quick から接続できません。
-> - そこで、Quick でログインするユーザー（＝今このNotebookを実行しているユーザー）の DEFAULT_ROLE を `CORTEX_QUICK_HOL_ROLE` に変えます。
+- Quick からの処理は、セッションで切り替えたロールではなく **DEFAULT_ROLE** で行われます。
+- ACCOUNTADMIN / SECURITYADMIN / ORGADMIN は OAuth でのログインが**ブロック**されるため、DEFAULT_ROLE が ACCOUNTADMIN のままだと Quick から接続できません。
+- そこで、Quick でログインするユーザー（＝今このNotebookを実行しているユーザー）の DEFAULT_ROLE を `CORTEX_QUICK_HOL_ROLE` に変えます。
 
 > 💡 変更後も、Snowsight 右上のロール切り替えや `USE ROLE ACCOUNTADMIN` で管理者として作業できます（次回ログイン時の初期ロールが変わるだけです）。
 > このNotebookも各セルで `ACCOUNTADMIN` に切り替えて実行しているので影響ありません。元に戻す方法は末尾のクリーンアップを参照してください。
 
-> 💡 **ハマりどころ④：ALLOWED_INTERFACES**
-> ユーザーの `ALLOWED_INTERFACES` が `SNOWFLAKE_INTELLIGENCE` などに制限されていると、Quick の OAuth ログイン自体は成功するのに MCP 呼び出しが 401（`395300 Not authorized to access interface ALL`）になり、**Quick がログイン画面を繰り返し表示**します。既定値（`ALL`）なら問題ありませんが、念のため下のセルで確認し、必要なら `ALL` に戻します。'''),
+> 💡 あわせて、ユーザーの `ALLOWED_INTERFACES` が `ALL` かを確認します（制限されていると Quick がログイン画面を繰り返し表示します）。'''),
     py('''before = {r["property"]: r["value"] for r in session.sql(f'DESC USER "{hol_user}"').collect()
           if r["property"] in ("DEFAULT_ROLE", "DEFAULT_WAREHOUSE")}
 print("変更前:", before)
