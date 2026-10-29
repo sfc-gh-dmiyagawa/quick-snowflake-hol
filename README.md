@@ -2,10 +2,6 @@
 
 Snowflake の **Cortex Analyst・Cortex Search・Cortex Agent** を一から組み立て、最後に **Amazon Quick** から自然言語で使えるようにするハンズオンです。
 
-元教材（Snowflake クイックスタート「Build Conversational Analytics with Amazon Quick and Snowflake MCP」/ AWS Workshop Studio）では、Cortex Code のスキルが Snowflake 側をまとめて自動構築します。
-このリポジトリでは、その処理を Notebook に分けました。上から実行しながら「何が作られているか」を確認できます。さらに次の2つを加えています。
-- **Cortex Search（PDF レポートの検索）**
-- **Semantic View の精度向上（改善前後の正答率の比較）**
 
 Quick 側の手順は日本語のガイドにしています。
 
@@ -31,8 +27,8 @@ PDF レポート（S3）→ Cortex Search ────────────�
 
 ## 必要なもの
 
-- **Snowflake アカウント**（Cortex の AI 機能が使えるもの。AWS リージョン推奨）
-- **AWS アカウント**（Amazon Quick を **us-west-2（Oregon）または us-east-1（N. Virginia）** で使えること）
+- **Snowflake アカウント**
+- **AWS アカウント**
 
 ## 進め方
 

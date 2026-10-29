@@ -10,6 +10,21 @@ import snowflake.snowpark.context as ctx
 session = Session.builder.config("connection_name", os.environ.get("SNOWFLAKE_CONNECTION", "handson")).create()
 ctx.get_active_session = lambda: session
 
+
+def split_sql(body):
+    """Split on ';' at line end, but never inside $$ ... $$ (procedure / spec bodies)."""
+    stmts, buf, in_dollar = [], [], False
+    for line in body.split("\n"):
+        buf.append(line)
+        in_dollar ^= line.count("$$") % 2 == 1
+        if not in_dollar and line.rstrip().endswith(";"):
+            stmts.append("\n".join(buf).rstrip().rstrip(";"))
+            buf = []
+    stmts.append("\n".join(buf))
+    # drop statements that are empty or comments only
+    return [s for s in stmts if re.sub(r"--[^\n]*", "", s).strip()]
+
+
 ns = {}
 fail = 0
 for path in sys.argv[1:]:
@@ -18,15 +33,17 @@ for path in sys.argv[1:]:
     for i, c in enumerate(nb.cells):
         if c.cell_type != "code":
             continue
-        src = c.source.replace("APPLY_DEFAULT_ROLE = True", "APPLY_DEFAULT_ROLE = False  # validation: keep user's default role")
+        src = c.source
         head = src.splitlines()[0][:70]
         try:
             if src.startswith("%%sql"):
                 name = re.match(r"%%sql -r (\w+)", src).group(1)
-                body = src.split("\n", 1)[1]
-                # split multi-statement cells on ';' at line end (no ';' inside our $$ bodies)
-                stmts = [s for s in re.split(r";\s*\n", body) if s.strip()]
-                for s in stmts:
+                res = []
+                for s in split_sql(src.split("\n", 1)[1]):
+                    # validation: keep the validating user's default role / warehouse
+                    if re.search(r"ALTER USER .* SET DEFAULT_(ROLE|WAREHOUSE)", s):
+                        print(f"[{i:02}] SKIP (validation) {s.strip()[:70]}")
+                        continue
                     res = session.sql(s).collect()
                 ns[name] = res
                 print(f"[{i:02}] OK  sql:{name}  rows={len(res)}  first={str(res[0])[:140] if res else ''}")

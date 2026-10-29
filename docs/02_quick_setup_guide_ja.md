@@ -20,10 +20,10 @@ AWS Workshop「AI-Powered Conversations with your Data Using Amazon Quick and Sn
 
 | 確認すること | 理由 |
 |---|---|
-| **AWS コンソールのリージョンが US West (Oregon) `us-west-2` または US East (N. Virginia) `us-east-1`** | Snowflake の OAuth 連携には両リージョンのコールバック URL（`https://us-west-2.quicksight.aws.amazon.com/sn/oauthcallback` / `https://us-east-1.quicksight.aws.amazon.com/sn/oauthcallback`）を登録しています。それ以外のリージョンで Quick を作るとログイン後にリダイレクトエラーになります（その場合は 05 の `QUICK_REGIONS` にリージョンを追加して OAuth 連携を作り直してください）。 |
+| **AWS コンソールのリージョンが US West (Oregon) `us-west-2` または US East (N. Virginia) `us-east-1`** | Snowflake の OAuth 連携には両リージョンのコールバック URL（`https://us-west-2.quicksight.aws.amazon.com/sn/oauthcallback` / `https://us-east-1.quicksight.aws.amazon.com/sn/oauthcallback`）を登録しています。それ以外のリージョンで Quick を作るとログイン後にリダイレクトエラーになります（その場合は `ALTER SECURITY INTEGRATION SALES_OPS_QUICK_SUITE_OAUTH SET OAUTH_ALTERNATE_REDIRECT_URIS = (...)` でそのリージョンの URL を追加してください）。 |
 | **Snowflake のユーザー名とパスワードを手元に用意** | Quick から Snowflake にログインするときに使います（Notebook を実行したユーザー）。 |
 | **05 の Step 3 を実行済み（DEFAULT_ROLE = `CORTEX_QUICK_HOL_ROLE`）** | DEFAULT_ROLE が ACCOUNTADMIN のままだと、OAuth ログインが拒否されます。 |
-| **Client secret はコピー直前に表示** | 05 の Step 5 で `SHOW_SECRET = True` にして実行し、貼り付けたら `False` に戻します。画面共有に注意してください。 |
+| **Client secret はコピー直前に表示** | 05 の Step 5 のセルの1行目を `SET SHOW_SECRET = TRUE;` にして実行し、貼り付けたら `FALSE` に戻します。画面共有に注意してください。 |
 
 ---
 
@@ -94,7 +94,7 @@ AWS Workshop「AI-Powered Conversations with your Data Using Amazon Quick and Sn
    | ベース URL | 自動入力（MCP server endpoint と同じ） |
    | クライアント ID | 05 の **Client ID** |
    | Public OAuth client | チェックしない |
-   | クライアントシークレット | 05 の **Client secret**（`SHOW_SECRET = True` で表示した全文） |
+   | クライアントシークレット | 05 の **Client secret**（`SET SHOW_SECRET = TRUE;` で表示した全文） |
    | トークン URL | 05 の **Token URL** |
    | 認証 URL | 05 の **Authorization URL** |
    | リダイレクト URL | 自動入力。05 の **Redirect URL**（us-west-2 / us-east-1 のどちらか）と一致していることを確認 |
@@ -330,6 +330,6 @@ Flow は、複数のシステムを跨ぐような複雑な操作を実行でき
 
 ## 8. 後片付け
 
-- **Snowflake 側**：`05_mcp_and_oauth.ipynb` 末尾のクリーンアップセルを使います。DEFAULT_ROLE を戻す場合は `RESTORE_DEFAULT_ROLE = "ACCOUNTADMIN"` にします。
+- **Snowflake 側**：`05_mcp_and_oauth.ipynb` 末尾のクリーンアップセルを使います。消したい行と、DEFAULT_ROLE を戻す行のコメント（`-- `）を外して実行します。
 - **Quick 側**：Flow → Chat Agent → Space → コネクタの順に削除します。ハンズオン用の AWS アカウントはイベント終了後に自動で削除されます。
 

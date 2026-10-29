@@ -205,60 +205,92 @@ def save(name, cells):
     print("wrote", name, len(cells), "cells")
 
 
-SETUP = '''from snowflake.snowpark.context import get_active_session
-session = get_active_session()   # Notebook がすでに張っている Snowflake への接続を取得
+SETUP_SQL = """USE ROLE ACCOUNTADMIN;
+USE WAREHOUSE CORTEX_QUICK_HOL_WH;
+USE SCHEMA CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA;
+SELECT CURRENT_ROLE() AS "ロール", CURRENT_WAREHOUSE() AS "ウェアハウス", CURRENT_SCHEMA() AS "スキーマ\""""
 
-DB, SCHEMA = "CORTEX_QUICK_HOL_DB", "CORTEX_QUICK_HOL_SCHEMA"
-HOL_ROLE, HOL_WH = "CORTEX_QUICK_HOL_ROLE", "CORTEX_QUICK_HOL_WH"
+SETUP_MD = """## Step 0. 実行環境をそろえる
 
-session.use_role("ACCOUNTADMIN")
-session.use_warehouse(HOL_WH)
-session.use_schema(f"{DB}.{SCHEMA}")
-print("ロール:", session.get_current_role(), "/ ウェアハウス:", session.get_current_warehouse())'''
+使うロール・ウェアハウス・スキーマを指定します。Notebook はそれぞれ独立して動くため、各 Notebook の最初に実行します。"""
 
 PREFLIGHT_MD = '### 事前チェック：AI 機能とクロスリージョン推論\n\n後半（Agent / Quick 連携）で詰まらないよう、**最初に** AI 機能が使えるかを確かめます。\n\n- `CORTEX_ENABLED_CROSS_REGION` は、アカウントのリージョンに必要なモデルがないときに他リージョンで推論する設定です。アカウントのリージョンによっては Agent のモデルが見つからないため、`setup.sql` で `ANY_REGION` にしています（データ自体は移動しません）。ここでは値を確認するだけです。\n- `AI_COMPLETE` を1回だけ呼び、AI 機能が使えるかを確認します（数文字の応答なので消費はごくわずかです）。'
-PREFLIGHT_PY = '''v = session.sql("SHOW PARAMETERS LIKE 'CORTEX_ENABLED_CROSS_REGION' IN ACCOUNT").collect()
-print("CORTEX_ENABLED_CROSS_REGION:", v[0]["value"] if v else "(不明)", "（setup.sql で ANY_REGION に設定済み）")
-
-try:
-    r = session.sql("SELECT AI_COMPLETE('claude-sonnet-4-5', 'Reply with OK only.') AS R").collect()[0]["R"]
-    print("OK: AI 機能が使えます（応答:", str(r).strip()[:20], "）")
-except Exception as e:
-    msg = str(e)
-    print("⚠️ AI_COMPLETE の呼び出しに失敗しました。モデル名の問題の可能性があります（Agent の動作は 04 で確認します）:\\n", msg[:300])'''
+PREFLIGHT_SQL_1 = "SHOW PARAMETERS LIKE 'CORTEX_ENABLED_CROSS_REGION' IN ACCOUNT"
+PREFLIGHT_SQL_2 = "SELECT AI_COMPLETE('claude-sonnet-4-5', 'Reply with OK only.') AS \"AI の応答\""
 
 
-ASK_AGENT = '''import json
+ASK_AGENT_SQL = """-- Agent に質問し、「使ったツール」「生成した SQL」「参照した文書」「回答」を表に整形して返す
+CREATE OR REPLACE PROCEDURE CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.ASK_AGENT(
+  QUESTION STRING, AGENT STRING DEFAULT 'SALES_OPS_AGENT')
+RETURNS TABLE ("種別" STRING, "内容" STRING)
+LANGUAGE SQL
+EXECUTE AS CALLER
+AS
+$$
+DECLARE
+  agent_fqn STRING DEFAULT 'CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.' || AGENT;
+  body STRING DEFAULT OBJECT_CONSTRUCT('messages', ARRAY_CONSTRUCT(OBJECT_CONSTRUCT(
+         'role', 'user', 'content', ARRAY_CONSTRUCT(OBJECT_CONSTRUCT('type', 'text', 'text', QUESTION)))))::STRING;
+  res RESULTSET;
+BEGIN
+  res := (
+    WITH r AS (SELECT TRY_PARSE_JSON(SNOWFLAKE.CORTEX.DATA_AGENT_RUN(:agent_fqn, :body)) AS J),
+         c AS (SELECT f.index AS N, f.value AS V FROM r, LATERAL FLATTEN(J:content) f)
+    SELECT CASE V:type::STRING WHEN 'text' THEN '回答' WHEN 'tool_use' THEN 'ツール' ELSE '参照文書' END,
+           CASE V:type::STRING
+             WHEN 'text'     THEN V:text::STRING
+             WHEN 'tool_use' THEN V:tool_use:name::STRING || IFF(V:tool_use:input:sql IS NULL, '', CHR(10) || V:tool_use:input:sql::STRING)
+             ELSE ARRAY_TO_STRING(ARRAY_DISTINCT(TRANSFORM(V:tool_result:content[0]:json:search_results, x -> x:doc_title::STRING)), ', ')
+           END
+    FROM c
+    WHERE V:type::STRING IN ('text', 'tool_use')
+       OR (V:type::STRING = 'tool_result' AND V:tool_result:content[0]:json:search_results IS NOT NULL)
+    ORDER BY N
+  );
+  RETURN TABLE(res);
+END;
+$$;
+GRANT USAGE ON PROCEDURE CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.ASK_AGENT(STRING, STRING) TO ROLE CORTEX_QUICK_HOL_ROLE"""
 
-def ask_agent(question: str, agent: str = "SALES_OPS_AGENT", show_sql: bool = True):
-    """Agent に質問し、回答・使ったツール・生成 SQL・検索した文書を表示する"""
-    payload = json.dumps({"messages": [{"role": "user", "content": [{"type": "text", "text": question}]}]})
-    raw = session.sql("SELECT SNOWFLAKE.CORTEX.DATA_AGENT_RUN(?, ?) AS R",
-                      params=[f"{DB}.{SCHEMA}.{agent}", payload]).collect()[0]["R"]
-    resp = json.loads(raw) if isinstance(raw, str) else raw
-    texts, sqls, tools, docs = [], [], [], []
-    for c in resp.get("content", []):
-        if c.get("type") == "text" and c.get("text", "").strip():
-            texts.append(c["text"])
-        elif c.get("type") == "tool_use":
-            tools.append(c.get("tool_use", {}).get("name"))
-        elif c.get("type") == "tool_result":
-            for x in c.get("tool_result", {}).get("content", []):
-                j = x.get("json", {})
-                if j.get("sql"):
-                    sqls.append(j["sql"])
-                for r in j.get("search_results", []) or []:
-                    if r.get("doc_title"):
-                        docs.append(r["doc_title"])
-    print(f"Q: {question}")
-    print(f"（使ったツール: {', '.join(t for t in tools if t) or 'なし'}）\\n")
-    print("\\n".join(texts))
-    if show_sql:
-        for s in sqls:
-            print("\\n--- Cortex Analyst が生成した SQL ---\\n" + s)
-    if docs:
-        print("\\n--- 参照した文書 ---\\n" + "\\n".join(sorted(set(docs))))
-    return resp'''
+ASK_AGENT_MD = """`ASK_AGENT` は、Agent を呼び出す関数 `SNOWFLAKE.CORTEX.DATA_AGENT_RUN` の結果（JSON）を、読みやすい表に整形するだけの SQL プロシージャです。
+以降は `CALL ASK_AGENT('質問');` の 1 行で Agent に質問できます。表の「種別」で、Agent がどのツールを使い、どんな SQL を作り、どの文書を参照したかが分かります。"""
+
+
+def eval_agent_sql(agent, sv):
+    return f"""CREATE OR REPLACE AGENT CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.{agent}
+  COMMENT = 'Evaluation agent (Cortex Analyst only) for {sv}'
+  FROM SPECIFICATION $$
+  models:
+    orchestration: auto
+  instructions:
+    response: Answer briefly with the number. Reply in the same language as the question.
+  tools:
+    - tool_spec:
+        type: cortex_analyst_text_to_sql
+        name: analyst
+        description: Sales operations data
+  tool_resources:
+    analyst:
+      semantic_view: CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.{sv}
+      execution_environment:
+        type: warehouse
+        warehouse: CORTEX_QUICK_HOL_WH
+  $$"""
+
+
+def search_sql(q):
+    return f"""SELECT r.index + 1 AS "順位",
+       r.value:FILE_NAME::STRING AS "ファイル",
+       LEFT(REGEXP_REPLACE(r.value:CHUNK::STRING, '\\\\s+', ' '), 300) AS "本文（先頭 300 文字）"
+FROM TABLE(FLATTEN(PARSE_JSON(SNOWFLAKE.CORTEX.SEARCH_PREVIEW(
+  'CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_DOCS_SEARCH',
+  '{{"query": "{q}", "columns": ["CHUNK", "FILE_NAME"], "limit": 3}}'
+)):results)) r"""
+
+
+def ask(q, agent=None):
+    a = f", '{agent}'" if agent else ""
+    return f"CALL CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.ASK_AGENT('{q}'{a})"
 
 FQ = "CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA."
 
@@ -291,15 +323,14 @@ Amazon Quick × Snowflake ハンズオン（Snowflake 編）の 1 本目です�
 
 数字は Snowflake のテーブルに、**社内の基準や推奨アクションは PDF のレポート**に書かれています。
 このハンズオンでは、両方をまたいで自然言語で答える **Cortex Agent** を作り、最後に **Amazon Quick** から使えるようにします。'''),
-    md('''## Step 0. セッションの準備と事前チェック
-
-このハンズオンで使う名前を変数にまとめ、AI 機能が使えるかを最初に確かめます。'''),
-    py(SETUP + '''
-info = session.sql("""SELECT CURRENT_USER() AS U, CURRENT_REGION() AS R,
-  CURRENT_ORGANIZATION_NAME() || '-' || CURRENT_ACCOUNT_NAME() AS A""").collect()[0]
-print("実行ユーザー:", info["U"], "/ アカウント:", info["A"], "/ リージョン:", info["R"])'''),
+    md(SETUP_MD),
+    sql("setup", SETUP_SQL + """;
+SELECT CURRENT_USER() AS "実行ユーザー", CURRENT_ORGANIZATION_NAME() || '-' || CURRENT_ACCOUNT_NAME() AS "アカウント", CURRENT_REGION() AS "リージョン\""""),
     md(PREFLIGHT_MD),
-    py(PREFLIGHT_PY),
+    sql("check_cross_region", PREFLIGHT_SQL_1),
+    md("`value` が `ANY_REGION` になっていれば OK です。続けて、AI 関数を 1 回だけ呼んでみます。"),
+    sql("check_ai", PREFLIGHT_SQL_2),
+    md("> ✅ 「AI の応答」に `OK` と返れば、AI 機能が使えます。"),
     md('''## Step 1. 構造化データ：6 つのテーブル
 
 `setup.sql` で公開 S3 から読み込んだ、営業オペレーションのサンプルデータです。まず件数を確認します（各 200 件）。
@@ -388,12 +419,8 @@ nb2 = [
 3. **同じ 9 問の質問で正答率を自動採点**して、改善の効果を数字で確かめます。
 
 **前提**：`01_explore_data.ipynb` を実行済みであること'''),
-    md('''## Step 0. セッションの準備
-
-Notebook はそれぞれ別の Python 実行環境で動くため、前の Notebook で作った変数や接続は引き継がれません。
-そこで各 Notebook の最初に、Snowflake への接続（`session`）を取得し、ロール・ウェアハウス・スキーマをそろえます。
-Python のセルから SQL を実行するには、この `session` が必要です。'''),
-    py(SETUP),
+    md(SETUP_MD),
+    sql("setup", SETUP_SQL),
     md('''## Step 1. Semantic View とは
 
 AI にテーブルだけを渡すと、「売上」「停滞商談」がどのカラムのどんな計算なのかを列名から**推測**します。
@@ -434,33 +461,10 @@ AI にテーブルだけを渡すと、「売上」「停滞商談」がどの�
     md('''### v1 で質問してみる
 
 Cortex Analyst だけを持つ評価用の Agent を作り、質問してみます（Agent については 04 で詳しく扱います。ここでは「Analyst を呼ぶための入れ物」と考えてください）。'''),
-    py('''def create_eval_agent(agent_name: str, sv_name: str):
-    """指定した Semantic View だけをツールに持つ、評価用の Agent を作る"""
-    session.sql(f"""
-CREATE OR REPLACE AGENT {DB}.{SCHEMA}.{agent_name}
-  COMMENT = 'Evaluation agent (Cortex Analyst only) for {sv_name}'
-  FROM SPECIFICATION $$
-  models:
-    orchestration: auto
-  instructions:
-    response: Answer briefly with the number. Reply in the same language as the question.
-  tools:
-    - tool_spec:
-        type: cortex_analyst_text_to_sql
-        name: analyst
-        description: Sales operations data
-  tool_resources:
-    analyst:
-      semantic_view: {DB}.{SCHEMA}.{sv_name}
-      execution_environment:
-        type: warehouse
-        warehouse: {HOL_WH}
-  $$""").collect()
-    print("OK:", agent_name, "→", sv_name)
-
-create_eval_agent("EVAL_AGENT_V1", "SALES_OPS_SV_BASIC")'''),
-    py(ASK_AGENT),
-    py('_ = ask_agent("停滞している商談は何件？", agent="EVAL_AGENT_V1")'),
+    sql("create_eval_agent_v1", eval_agent_sql("EVAL_AGENT_V1", "SALES_OPS_SV_BASIC")),
+    md(ASK_AGENT_MD),
+    sql("create_ask_agent", ASK_AGENT_SQL),
+    sql("ask_v1_stalled", ask("停滞している商談は何件？", "EVAL_AGENT_V1")),
     md('''> 💡 回答の数字と、生成された SQL の条件を見てください。「停滞」の定義（40日超・未クローズ）を知らないため、
 > Agent は自分で条件を推測するか、答えられないと返します。01 で確かめた正解は **43 件** です。'''),
     md('''## Step 3. 改善版の Semantic View（v2）を作る
@@ -503,9 +507,8 @@ v2 は同義語・KPI・検証済みクエリが多く、画面で 1 つずつ�
     sql("create_semantic_view", SV_CELL),
     md("作成できたか確認し、ハンズオン用ロールに参照権限を付けます。"),
     sql("show_semantic_views", "SHOW SEMANTIC VIEWS IN SCHEMA CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA"),
-    py('''for sv in ["SALES_OPS_SV_BASIC", "SALES_OPS_SEMANTIC_VIEW"]:
-    session.sql(f"GRANT SELECT ON SEMANTIC VIEW {DB}.{SCHEMA}.{sv} TO ROLE {HOL_ROLE}").collect()
-print("OK: Semantic View への SELECT を付与しました")'''),
+    sql("grant_sv", """GRANT SELECT ON SEMANTIC VIEW CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_SV_BASIC TO ROLE CORTEX_QUICK_HOL_ROLE;
+GRANT SELECT ON SEMANTIC VIEW CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_SEMANTIC_VIEW TO ROLE CORTEX_QUICK_HOL_ROLE"""),
     md('''### SQL で直接クエリしてみる
 
 `SEMANTIC_VIEW()` 関数を使うと、**メトリクス名を指定するだけ**で、定義どおりの集計を SQL から使えます。
@@ -546,8 +549,13 @@ ORDER BY TOTAL_REVENUE DESC'''),
 | 9 | 商談の勝率は？ | 69.7% | 社内 KPI |
 
 > 9 問を 5 並列で投げるので、1 回の採点は 30〜60 秒ほどです。AI の回答は毎回少しずつ変わるため、v1 の点数は実行ごとに前後します。'''),
-    py('''import time
+    sql("create_eval_agent_v2", eval_agent_sql("EVAL_AGENT_V2", "SALES_OPS_SEMANTIC_VIEW")),
+    md('''採点は、9 問を並列で投げて結果を照合する処理なので、ここだけ Python で書いています（`session` は Python から SQL を実行するための接続です）。'''),
+    py('''import json, time
 from concurrent.futures import ThreadPoolExecutor
+from snowflake.snowpark.context import get_active_session
+session = get_active_session()
+DB, SCHEMA = "CORTEX_QUICK_HOL_DB", "CORTEX_QUICK_HOL_SCHEMA"
 
 EVAL_SET = [
     ("北米の売上合計は？",                                     5947306.61),
@@ -597,9 +605,7 @@ def evaluate(agent_name: str):
     for r in rows:
         print(f"  {'○' if r['OK'] else '×'}  {r['QUESTION']}")
     return rows'''),
-    py('''create_eval_agent("EVAL_AGENT_V2", "SALES_OPS_SEMANTIC_VIEW")
-
-result_v1 = evaluate("EVAL_AGENT_V1")
+    py('''result_v1 = evaluate("EVAL_AGENT_V1")
 result_v2 = evaluate("EVAL_AGENT_V2")'''),
     md('''### 結果を並べる'''),
     py('''import pandas as pd
@@ -621,9 +627,8 @@ df'''),
     md('''### 後片付け（評価用 Agent）
 
 評価用の Agent は以降使わないので削除します（Semantic View v1 は比較用に残しておきます）。'''),
-    py('''for a in ["EVAL_AGENT_V1", "EVAL_AGENT_V2"]:
-    session.sql(f"DROP AGENT IF EXISTS {DB}.{SCHEMA}.{a}").collect()
-print("OK: 評価用 Agent を削除しました")'''),
+    sql("drop_eval_agents", """DROP AGENT IF EXISTS CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.EVAL_AGENT_V1;
+DROP AGENT IF EXISTS CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.EVAL_AGENT_V2"""),
     md('''✅ 02 はここまでです。次は `03_cortex_search.ipynb` に進みます。'''),
 ]
 
@@ -643,12 +648,8 @@ Cortex Search Service `SALES_DOCS_SEARCH` → 04 で Agent のツールにする
 ```
 
 **前提**：`02_cortex_analyst.ipynb` を実行済みであること'''),
-    md('''## Step 0. セッションの準備
-
-Notebook はそれぞれ別の Python 実行環境で動くため、前の Notebook で作った変数や接続は引き継がれません。
-そこで各 Notebook の最初に、Snowflake への接続（`session`）を取得し、ロール・ウェアハウス・スキーマをそろえます。
-Python のセルから SQL を実行するには、この `session` が必要です。'''),
-    py(SETUP),
+    md(SETUP_MD),
+    sql("setup", SETUP_SQL),
     md('''## Step 1. PDF からテキストを取り出す
 
 `AI_PARSE_DOCUMENT` の `LAYOUT` モードは、見出しや**表の構造を保ったまま** Markdown のテキストにします。'''),
@@ -721,23 +722,14 @@ Step 1・2 で作った `DOCS_CHUNKS` テーブルを、画面から検索サー
   EMBEDDING_MODEL = 'snowflake-arctic-embed-l-v2.0'
   AS SELECT CHUNK_ID, CHUNK, FILE_NAME, CHUNK_NO FROM {FQ}DOCS_CHUNKS'''),
     md("GUI・SQL どちらで作った場合も、次のセルで権限を付けます。"),
-    py('''session.sql(f"GRANT USAGE ON CORTEX SEARCH SERVICE {DB}.{SCHEMA}.SALES_DOCS_SEARCH TO ROLE {HOL_ROLE}").collect()
-print("OK: Cortex Search Service への USAGE を付与しました")'''),
+    sql("grant_search", "GRANT USAGE ON CORTEX SEARCH SERVICE CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_DOCS_SEARCH TO ROLE CORTEX_QUICK_HOL_ROLE"),
     md('''## Step 4. 検索してみる
 
-`SEARCH_PREVIEW` で、質問に近いチャンクを上位から取り出します。英語の PDF に**日本語で**質問しています。'''),
-    py('''def search_docs(query: str, limit: int = 3):
-    req = json.dumps({"query": query, "columns": ["CHUNK", "FILE_NAME"], "limit": limit})
-    res = json.loads(session.sql("SELECT SNOWFLAKE.CORTEX.SEARCH_PREVIEW(?, ?) AS R",
-                                 params=[f"{DB}.{SCHEMA}.SALES_DOCS_SEARCH", req]).collect()[0]["R"])
-    print(f"Q: {query}\\n")
-    for i, r in enumerate(res["results"], 1):
-        print(f"[{i}] {r['FILE_NAME']}\\n{' '.join(r['CHUNK'].split())[:300]}...\\n")
-
-import json
-search_docs("推奨されるパイプラインカバレッジの目安は？")'''),
-    py('search_docs("停滞している商談にはどう対応すべき？")'),
-    py('search_docs("解約リスクが高い顧客に共通する特徴は？")'),
+`SEARCH_PREVIEW` で、質問に近いチャンクを上位から取り出します。英語の PDF に**日本語で**質問しています。
+質問を変えて試す場合は、SQL の `query` の部分を書き換えて実行してください。'''),
+    sql("search_coverage", search_sql("推奨されるパイプラインカバレッジの目安は？")),
+    sql("search_stalled", search_sql("停滞している商談にはどう対応すべき？")),
+    sql("search_churn", search_sql("解約リスクが高い顧客に共通する特徴は？")),
     md('''> ✅ それぞれの質問に、関係する段落（推奨 1.6 倍、役員スポンサーの関与、技術的なエスカレーションなど）が上位に返れば成功です。
 '''),
     md('''✅ 03 はここまでです。次は `04_cortex_agent.ipynb` で、Analyst と Search を 1 つの Agent にまとめます。'''),
@@ -757,12 +749,8 @@ nb_agent = [
 **両方を使うと**、「レポートの推奨値を、実際のデータが満たしているか」のような質問に 1 回で答えられます。
 
 **前提**：`03_cortex_search.ipynb` を実行済みであること'''),
-    md('''## Step 0. セッションの準備
-
-Notebook はそれぞれ別の Python 実行環境で動くため、前の Notebook で作った変数や接続は引き継がれません。
-そこで各 Notebook の最初に、Snowflake への接続（`session`）を取得し、ロール・ウェアハウス・スキーマをそろえます。
-Python のセルから SQL を実行するには、この `session` が必要です。'''),
-    py(SETUP),
+    md(SETUP_MD),
+    sql("setup", SETUP_SQL),
     md('''## Step 1. Agent を作る
 
 | 設定（SQL の spec の項目） | 内容 |
@@ -846,14 +834,14 @@ Python のセルから SQL を実行するには、この `session` が必要で
       id_column: CHUNK_ID
   $$'''),
     md("GUI・SQL どちらで作った場合も、次のセルで権限を付けます（Quick からはハンズオン用ロールで実行されるため）。Agent を作り直すと権限は消えるので、そのたびに実行してください。"),
-    py('''session.sql(f"GRANT USAGE ON AGENT {DB}.{SCHEMA}.SALES_OPS_AGENT TO ROLE {HOL_ROLE}").collect()
-print("OK: Agent への USAGE を付与しました")'''),
+    sql("grant_agent", "GRANT USAGE ON AGENT CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_AGENT TO ROLE CORTEX_QUICK_HOL_ROLE"),
     sql("show_agent_grants", "SHOW GRANTS ON AGENT CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_AGENT"),
     md('''## Step 2. Agent に質問する
 
 Quick につなぐ前に、Snowflake 上で答えられるかを確認します。**ここで失敗する場合は、Quick からも同じエラーになります。**
 各回答の上に「使ったツール」が表示されます。質問によって Agent がツールを使い分けていることを確かめてください。'''),
-    py(ASK_AGENT),
+    md(ASK_AGENT_MD + "（02 で作ったものと同じです。02 を飛ばした場合に備えて、ここでも作成します）"),
+    sql("create_ask_agent", ASK_AGENT_SQL),
     md('''| # | 質問 | 使うはずのツール | 期待される結果（目安） |
 |---|---|---|---|
 | 1 | 地域別の売上を教えて | Analyst | 北米 約 $5.95M が最大 |
@@ -863,20 +851,18 @@ Quick につなぐ前に、Snowflake 上で答えられるかを確認します�
 | 5 | 停滞商談への推奨アクションは？対象の件数と金額も | **両方** | 役員スポンサーの関与など＋43 件 |
 
 > 💡 1 回の質問には 15〜40 秒ほどかかります。Quick から呼ぶ場合も同じです（60 秒を超えるとタイムアウト）。'''),
-    py('_ = ask_agent("地域別の売上を教えて")'),
-    py('_ = ask_agent("停滞商談は何件で、金額はいくら？")'),
-    py('_ = ask_agent("レポートで推奨されているパイプラインカバレッジは？", show_sql=False)'),
-    py('_ = ask_agent("推奨カバレッジを下回っている営業担当は何人？推奨値の根拠も教えて")'),
-    py('_ = ask_agent("停滞商談への推奨アクションは？対象の件数と金額も", show_sql=False)'),
+    sql("ask_q1", ask("地域別の売上を教えて")),
+    sql("ask_q2", ask("停滞商談は何件で、金額はいくら？")),
+    sql("ask_q3", ask("レポートで推奨されているパイプラインカバレッジは？")),
+    sql("ask_q4", ask("推奨カバレッジを下回っている営業担当は何人？推奨値の根拠も教えて")),
+    sql("ask_q5", ask("停滞商談への推奨アクションは？対象の件数と金額も")),
     md('''### ハンズオン用ロールで実行できるか確認する
 
 Quick からはハンズオン用ロールで実行されます。ロールを切り替えて同じように答えられるか確かめます。'''),
-    py('''session.use_role(HOL_ROLE)
-try:
-    _ = ask_agent("営業担当の目標達成率トップ3は？", show_sql=False)
-    _ = ask_agent("レポートで推奨されているパイプラインカバレッジは？", show_sql=False)
-finally:
-    session.use_role("ACCOUNTADMIN")'''),
+    sql("ask_as_hol_role_1", "USE ROLE CORTEX_QUICK_HOL_ROLE;\n" + ask("営業担当の目標達成率トップ3は？")),
+    sql("ask_as_hol_role_2", ask("レポートで推奨されているパイプラインカバレッジは？")),
+    md("確認できたら、ロールを ACCOUNTADMIN に戻します。"),
+    sql("back_to_admin", "USE ROLE ACCOUNTADMIN"),
     md('''## Step 3. Agent Studio で確認・編集する（GUI）
 
 作った Agent は、Snowsight の画面から確認・編集できます（方法 A で作った場合は、作成時の画面と同じです）。
@@ -910,25 +896,10 @@ nb5 = [
 | OAuth 連携 `SALES_OPS_QUICK_SUITE_OAUTH` | Quick のユーザーが Snowflake にログインするための仕組み |
 
 **前提**：`04_cortex_agent.ipynb` を最後まで実行済みであること'''),
-    md('''## Step 0. セッションの準備
-
-Notebook はそれぞれ別の Python 実行環境で動くため、前の Notebook で作った変数や接続は引き継がれません。
-そこで各 Notebook の最初に、Snowflake への接続（`session`）を取得し、ロール・ウェアハウス・スキーマをそろえます。
-Python のセルから SQL を実行するには、この `session` が必要です。'''),
-    py(SETUP + '''
-
-# Quick のリージョン（OAuth のリダイレクト先と完全一致させる必要があります）
-# us-west-2 / us-east-1 のどちらで Quick を作っても通るよう、両方を登録します
-QUICK_REGIONS = ["us-west-2", "us-east-1"]
-quick_redirect_uris = [f"https://{r}.quicksight.aws.amazon.com/sn/oauthcallback" for r in QUICK_REGIONS]
-quick_redirect_uri = quick_redirect_uris[0]
-
-row = session.sql("""SELECT CURRENT_USER() AS U,
-  REPLACE(CURRENT_ORGANIZATION_NAME() || '-' || CURRENT_ACCOUNT_NAME(), '_', '-') AS H""").collect()[0]
-hol_user, account_host = row["U"], row["H"]
-print("ユーザー          :", hol_user)
-print("アカウントホスト  :", f"{account_host}.snowflakecomputing.com")
-print("OAuth リダイレクト:", ", ".join(quick_redirect_uris))'''),
+    md(SETUP_MD),
+    sql("setup", SETUP_SQL + """;
+SELECT CURRENT_USER() AS "ユーザー",
+       REPLACE(CURRENT_ORGANIZATION_NAME() || '-' || CURRENT_ACCOUNT_NAME(), '_', '-') || '.snowflakecomputing.com' AS "アカウントホスト\""""),
     md('''> 💡 **アカウントホストについて**：MCP エンドポイントや OAuth の URL は `<組織名>-<アカウント名>.snowflakecomputing.com` で組み立てます。
 > アカウント名に `_` が含まれる場合は `-` に置き換えます（URL で使えないため）。'''),
     md('''## Step 1. MCP Server を作る
@@ -951,16 +922,15 @@ Snowflake Managed MCP Server を使うと、**サーバーを自前で立てず�
     md('''## Step 2. 権限を付ける
 
 MCP Server の USAGE だけでは、配下のツールは使えません。**Agent・Semantic View・Cortex Search の権限も必要**です（02〜04 で付与済み）。
-ここでは MCP Server への USAGE を付け、3つがそろっているかをまとめて確認します。
+ここでは MCP Server への USAGE を付け、ハンズオン用ロールにそろっているかをまとめて確認します（一覧の `CORTEX_AGENT_SERVER` が MCP Server です）。
 
 > 💡 **元教材との違い**：AWS Workshop 5章 Step 6 では MCP Server への GRANT が2回書かれ、Agent への GRANT が抜けています。本ハンズオンでは 04 で Agent への GRANT を行っています。'''),
-    py('''session.sql(f"GRANT USAGE ON MCP SERVER {DB}.{SCHEMA}.SALES_OPS_MCP_SERVER TO ROLE {HOL_ROLE}").collect()
-
-for obj in ["MCP SERVER", "AGENT", "SEMANTIC VIEW", "CORTEX SEARCH SERVICE"]:
-    name = {"MCP SERVER": "SALES_OPS_MCP_SERVER", "AGENT": "SALES_OPS_AGENT", "SEMANTIC VIEW": "SALES_OPS_SEMANTIC_VIEW", "CORTEX SEARCH SERVICE": "SALES_DOCS_SEARCH"}[obj]
-    rows = session.sql(f"SHOW GRANTS ON {obj} {DB}.{SCHEMA}.{name}").collect()
-    ok = any(r["grantee_name"] == HOL_ROLE for r in rows)
-    print(f"{obj:<22} {name:<26} {HOL_ROLE} への付与: {'OK' if ok else '未付与'}")'''),
+    sql("grant_mcp", """GRANT USAGE ON MCP SERVER CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_MCP_SERVER TO ROLE CORTEX_QUICK_HOL_ROLE;
+-- ハンズオン用ロールに付いている権限を一覧（MCP Server・Agent・Semantic View・Cortex Search の 4 つがあれば OK）
+SHOW GRANTS TO ROLE CORTEX_QUICK_HOL_ROLE
+  ->> SELECT "privilege", "granted_on", "name" FROM $1
+      WHERE "granted_on" IN ('CORTEX_AGENT_SERVER', 'CORTEX_AGENT', 'SEMANTIC_VIEW', 'CORTEX_SEARCH_SERVICE')
+      ORDER BY "granted_on", "name\""""),
     sql("show_mcp_servers", '''SHOW MCP SERVERS IN SCHEMA CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA'''),
     md('''## Step 3. 接続ユーザーの既定ロールを設定する
 
@@ -971,26 +941,17 @@ Quick から OAuth でログインしたとき、Snowflake は **そのユーザ
 - そこで、Quick でログインするユーザー（＝今このNotebookを実行しているユーザー）の DEFAULT_ROLE を `CORTEX_QUICK_HOL_ROLE` に変えます。
 
 > 💡 変更後も、Snowsight 右上のロール切り替えや `USE ROLE ACCOUNTADMIN` で管理者として作業できます（次回ログイン時の初期ロールが変わるだけです）。
-> このNotebookも各セルで `ACCOUNTADMIN` に切り替えて実行しているので影響ありません。元に戻す方法は末尾のクリーンアップを参照してください。
+> このNotebookも Step 0 で `USE ROLE ACCOUNTADMIN` を実行しているので影響ありません。元に戻す方法は末尾のクリーンアップを参照してください。
 
-> 💡 あわせて、ユーザーの `ALLOWED_INTERFACES` が `ALL` かを確認します（制限されていると Quick がログイン画面を繰り返し表示します）。'''),
-    py('''before = {r["property"]: r["value"] for r in session.sql(f'DESC USER "{hol_user}"').collect()
-          if r["property"] in ("DEFAULT_ROLE", "DEFAULT_WAREHOUSE")}
-print("変更前:", before)
-
-APPLY_DEFAULT_ROLE = True   # 既定ロールを変えたくない場合は False（その場合 Quick からは接続できません）
-if APPLY_DEFAULT_ROLE:
-    session.sql(f'ALTER USER "{hol_user}" SET DEFAULT_ROLE = \\'{HOL_ROLE}\\'').collect()
-    session.sql(f'ALTER USER "{hol_user}" SET DEFAULT_WAREHOUSE = \\'{HOL_WH}\\'').collect()
-    print("変更後: DEFAULT_ROLE =", HOL_ROLE, "/ DEFAULT_WAREHOUSE =", HOL_WH)
-
-# ALLOWED_INTERFACES の確認（SNOWFLAKE_INTELLIGENCE のみだと Quick が OAuth ループになる）
-props = {r["property"]: r["value"] for r in session.sql(f'DESC USER "{hol_user}"').collect()}
-cur = (props.get("ALLOWED_INTERFACES") or "[ALL]")
-print("ALLOWED_INTERFACES:", cur)
-if "ALL" not in cur.upper().replace("[", " ").replace("]", " ").replace(",", " ").split():
-    session.sql(f"ALTER USER \\"{hol_user}\\" SET ALLOWED_INTERFACES = ('ALL')").collect()
-    print("→ ('ALL') に戻しました（Quick の MCP 接続に必要）")'''),
+> 💡 あわせて、ユーザーの `ALLOWED_INTERFACES` を `ALL` にします（制限されていると Quick がログイン画面を繰り返し表示します。既定値は `ALL` なので、通常は変化しません）。
+>
+> 既定ロールを変えたくない場合は、このセルを実行しないでください（その場合 Quick からは接続できません）。'''),
+    sql("set_default_role", """SET HOL_USER = CURRENT_USER();
+ALTER USER IDENTIFIER($HOL_USER) SET DEFAULT_ROLE = CORTEX_QUICK_HOL_ROLE;
+ALTER USER IDENTIFIER($HOL_USER) SET DEFAULT_WAREHOUSE = CORTEX_QUICK_HOL_WH;
+ALTER USER IDENTIFIER($HOL_USER) SET ALLOWED_INTERFACES = ('ALL');
+DESC USER IDENTIFIER($HOL_USER)
+  ->> SELECT "property", "value" FROM $1 WHERE "property" IN ('DEFAULT_ROLE', 'DEFAULT_WAREHOUSE', 'ALLOWED_INTERFACES')"""),
     md('''## Step 4. OAuth 連携を作る
 
 Amazon Quick のユーザーは OAuth で Snowflake にログインします。ログイン後の処理は、そのユーザーのロールの権限内で行われます（**RBAC がそのまま効く**）。
@@ -1008,45 +969,39 @@ Amazon Quick のユーザーは OAuth で Snowflake にログインします。�
 作成には ACCOUNTADMIN が必要です。
 
 > ⚠️ このセルを再実行すると **Client ID / Secret が変わります**。Quick 側に登録した後で再実行した場合は、Quick のコネクタも作り直してください。'''),
-    py('''alt_uris_sql = ", ".join("'" + u + "'" for u in quick_redirect_uris[1:])
-session.sql(f"""
-CREATE OR REPLACE SECURITY INTEGRATION SALES_OPS_QUICK_SUITE_OAUTH
+    sql("create_oauth", """CREATE OR REPLACE SECURITY INTEGRATION SALES_OPS_QUICK_SUITE_OAUTH
   TYPE = OAUTH
   ENABLED = TRUE
   OAUTH_CLIENT = CUSTOM
   OAUTH_CLIENT_TYPE = 'CONFIDENTIAL'
-  OAUTH_REDIRECT_URI = '{quick_redirect_uris[0]}'
-  OAUTH_ALTERNATE_REDIRECT_URIS = ({alt_uris_sql})
+  OAUTH_REDIRECT_URI = 'https://us-west-2.quicksight.aws.amazon.com/sn/oauthcallback'
+  OAUTH_ALTERNATE_REDIRECT_URIS = ('https://us-east-1.quicksight.aws.amazon.com/sn/oauthcallback')
   OAUTH_ISSUE_REFRESH_TOKENS = TRUE
   OAUTH_USE_SECONDARY_ROLES = 'NONE'
-  OAUTH_REFRESH_TOKEN_VALIDITY = 86400
-""").collect()
-print("OK: SALES_OPS_QUICK_SUITE_OAUTH を作成しました")'''),
+  OAUTH_REFRESH_TOKEN_VALIDITY = 86400"""),
     md('''## Step 5. Amazon Quick に入力する値を表示する
 
 次のセルで、Quick のコネクタ設定に必要な値をまとめて表示します。手順は `docs/02_quick_setup_guide_ja.md` を参照してください。
 
-> ⚠️ **Client Secret は画面共有で見せないよう注意してください。** 既定では伏せ字で表示し、`SHOW_SECRET = True` にしたときだけ全文を表示します。
-> Quick に貼り付けるときだけ `True` にして実行し、貼り付け後は `False` に戻して再実行してください。
+> ⚠️ **Client Secret は画面共有で見せないよう注意してください。** 既定では伏せ字で表示し、1 行目を `SET SHOW_SECRET = TRUE;` にしたときだけ全文を表示します。
+> Quick に貼り付けるときだけ `TRUE` にして実行し、貼り付け後は `FALSE` に戻して再実行してください。
 
 > 💡 Quick で OAuth ログイン画面が出たら、**この Snowflake アカウントのユーザー名とパスワード**でログインします（MFA を登録済みならその確認も求められます）。'''),
-    py('''import json
-SHOW_SECRET = False
-
-sec = json.loads(session.sql("SELECT SYSTEM$SHOW_OAUTH_CLIENT_SECRETS('SALES_OPS_QUICK_SUITE_OAUTH') AS S").collect()[0]["S"])
-base = f"https://{account_host}.snowflakecomputing.com"
-secret = sec["OAUTH_CLIENT_SECRET"]
-
-quick_settings = {
-    "MCP server endpoint": f"{base}/api/v2/databases/{DB}/schemas/{SCHEMA}/mcp-servers/SALES_OPS_MCP_SERVER",
-    "Client ID":           sec["OAUTH_CLIENT_ID"],
-    "Client secret":       secret if SHOW_SECRET else secret[:4] + "*" * (len(secret) - 4),
-    "Token URL":           f"{base}/oauth/token-request",
-    "Authorization URL":   f"{base}/oauth/authorize",
-    "Redirect URL":        " または ".join(quick_redirect_uris) + "（Quick 側の表示と一致すれば OK）",
-}
-for k, v in quick_settings.items():
-    print(f"{k:<20}: {v}")'''),
+    sql("quick_settings", """-- Quick に Client secret を貼り付けるときだけ TRUE にする（貼り付けたら FALSE に戻す）
+SET SHOW_SECRET = FALSE;
+WITH s AS (SELECT PARSE_JSON(SYSTEM$SHOW_OAUTH_CLIENT_SECRETS('SALES_OPS_QUICK_SUITE_OAUTH')) AS J),
+     h AS (SELECT 'https://' || REPLACE(CURRENT_ORGANIZATION_NAME() || '-' || CURRENT_ACCOUNT_NAME(), '_', '-') || '.snowflakecomputing.com' AS B)
+SELECT "項目", "値" FROM (
+            SELECT 1 AS O, 'MCP server endpoint' AS "項目",
+                   B || '/api/v2/databases/CORTEX_QUICK_HOL_DB/schemas/CORTEX_QUICK_HOL_SCHEMA/mcp-servers/SALES_OPS_MCP_SERVER' AS "値" FROM h
+  UNION ALL SELECT 2, 'Client ID', J:OAUTH_CLIENT_ID::STRING FROM s
+  UNION ALL SELECT 3, 'Client secret', IFF($SHOW_SECRET, J:OAUTH_CLIENT_SECRET::STRING,
+                   LEFT(J:OAUTH_CLIENT_SECRET::STRING, 4) || REPEAT('*', LENGTH(J:OAUTH_CLIENT_SECRET::STRING) - 4)) FROM s
+  UNION ALL SELECT 4, 'Token URL', B || '/oauth/token-request' FROM h
+  UNION ALL SELECT 5, 'Authorization URL', B || '/oauth/authorize' FROM h
+  UNION ALL SELECT 6, 'Redirect URL', 'https://us-west-2.quicksight.aws.amazon.com/sn/oauthcallback または https://us-east-1.quicksight.aws.amazon.com/sn/oauthcallback（Quick 側の表示と一致すれば OK）'
+)
+ORDER BY O"""),
     md('''## Step 6. 設定をまとめて確認する（トラブル時にも使えます）
 
 | 症状 | 原因 | 対処 |
@@ -1056,65 +1011,50 @@ for k, v in quick_settings.items():
 | Agent を作り直したら権限が消えた | `CREATE OR REPLACE` は GRANT を引き継がない | GRANT をやり直す |
 | Quick から「権限がない」 | DEFAULT_ROLE に権限がない | Step 2・3 を確認 |
 | OAuth ログインで拒否される | ACCOUNTADMIN 等は既定でブロック | 既定ロールを `CORTEX_QUICK_HOL_ROLE` に |
-| OAuth で `mismatch in the given redirect uri` | Quick のリージョンが登録済み（us-west-2 / us-east-1）以外 | エラー画面の URL の `redirect_uri=` の値を `QUICK_REGIONS` に追加して Step 4 を再実行（Client ID / Secret が変わるので Quick も再入力） |
+| OAuth で `mismatch in the given redirect uri` | Quick のリージョンが登録済み（us-west-2 / us-east-1）以外 | エラー画面の URL の `redirect_uri=` の値を、`ALTER SECURITY INTEGRATION SALES_OPS_QUICK_SUITE_OAUTH SET OAUTH_ALTERNATE_REDIRECT_URIS = ('<その値>')` で追加（Client ID / Secret は変わりません） |
 | Quick で 424 / タイムアウト | MCP の呼び出しは 60 秒で打ち切り | 質問を簡単にする、検証済みクエリを増やす |
 | Quick がログイン画面を繰り返す（401） | ユーザーの `ALLOWED_INTERFACES` が制限されている | Step 3 のセルで `ALL` に戻す |
 | Quick のログインで `invalid_client` | Client ID / Secret の貼り間違い、または OAuth 連携を作り直した | Step 5 の値を貼り直す |
 | Quick で Snowflake の URL エラー | アカウント名の `_` をそのまま使っている | Step 5 で表示された URL（`-` に置換済み）を使う |'''),
-    py('''print("=== OAuth 連携")
-for r in session.sql("DESCRIBE SECURITY INTEGRATION SALES_OPS_QUICK_SUITE_OAUTH").collect():
-    if r["property"] in ("ENABLED", "OAUTH_REDIRECT_URI", "OAUTH_ALTERNATE_REDIRECT_URIS", "OAUTH_CLIENT_TYPE", "OAUTH_USE_SECONDARY_ROLES", "BLOCKED_ROLES_LIST"):
-        print(f"  {r['property']:<28} {r['property_value']}")
-
-print("\\n=== 接続ユーザーの既定設定")
-for r in session.sql(f'DESC USER "{hol_user}"').collect():
-    if r["property"] in ("DEFAULT_ROLE", "DEFAULT_WAREHOUSE"):
-        print(f"  {r['property']:<28} {r['value']}")
-
-print("\\n=== Quick と同じロール（DEFAULT_ROLE）で MCP / Agent / Semantic View を使えるか")
-session.use_role(HOL_ROLE)
-try:
-    for obj, name in [("MCP SERVER", "SALES_OPS_MCP_SERVER"), ("AGENT", "SALES_OPS_AGENT")]:
-        session.sql(f"DESCRIBE {obj} {DB}.{SCHEMA}.{name}").collect()
-        print(f"  {HOL_ROLE} で {obj} {name} を参照: OK")
-    n = session.sql(f"SELECT COUNT(*) AS N FROM SEMANTIC_VIEW({DB}.{SCHEMA}.SALES_OPS_SEMANTIC_VIEW METRICS TRANSACTIONS.TOTAL_REVENUE)").collect()[0]["N"]
-    print(f"  {HOL_ROLE} で Semantic View をクエリ: OK")
-finally:
-    session.use_role("ACCOUNTADMIN")'''),
+    sql("check_oauth", """DESCRIBE SECURITY INTEGRATION SALES_OPS_QUICK_SUITE_OAUTH
+  ->> SELECT "property", "property_value" FROM $1
+      WHERE "property" IN ('ENABLED', 'OAUTH_REDIRECT_URI', 'OAUTH_ALTERNATE_REDIRECT_URIS',
+                           'OAUTH_CLIENT_TYPE', 'OAUTH_USE_SECONDARY_ROLES', 'BLOCKED_ROLES_LIST')"""),
+    sql("check_user", """SET HOL_USER = CURRENT_USER();
+DESC USER IDENTIFIER($HOL_USER)
+  ->> SELECT "property", "value" FROM $1 WHERE "property" IN ('DEFAULT_ROLE', 'DEFAULT_WAREHOUSE', 'ALLOWED_INTERFACES')"""),
+    md("Quick と同じロール（`CORTEX_QUICK_HOL_ROLE`）で、MCP Server・Agent・Semantic View を使えるか確かめます。エラーにならず金額が表示されれば OK です。"),
+    sql("check_as_hol_role", """USE ROLE CORTEX_QUICK_HOL_ROLE;
+DESCRIBE MCP SERVER CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_MCP_SERVER;
+DESCRIBE AGENT CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_AGENT;
+SELECT * FROM SEMANTIC_VIEW(CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_SEMANTIC_VIEW METRICS TRANSACTIONS.TOTAL_REVENUE)"""),
+    sql("back_to_admin", "USE ROLE ACCOUNTADMIN"),
     md('''✅ Snowflake 側の準備はここまでです。続きは `docs/02_quick_setup_guide_ja.md` に沿って Amazon Quick 側を設定してください。
 
 ---
 
 ## クリーンアップ（ハンズオン終了後）
 
-作成したオブジェクトを削除します。誤って実行しないよう、`RUN_CLEANUP = True` にしたときだけ実行されます。
-DB・ウェアハウス・ロールまで消す場合は `DROP_BASE_OBJECTS = True` にしてください。
-既定ロールを変更した場合は、`RESTORE_DEFAULT_ROLE` に元のロール名を入れると戻せます。'''),
-    py('''RUN_CLEANUP = False
-DROP_BASE_OBJECTS = False
-RESTORE_DEFAULT_ROLE = None   # 例: "ACCOUNTADMIN"（変更前のロール）
+作成したオブジェクトを削除します。誤って実行しないよう、**すべてコメントアウト**してあります。消したい行の先頭の `-- ` を外して実行してください。'''),
+    sql("cleanup", """-- ① ハンズオンで作ったもの
+-- DROP MCP SERVER IF EXISTS CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_MCP_SERVER;
+-- DROP AGENT IF EXISTS CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_AGENT;
+-- DROP SEMANTIC VIEW IF EXISTS CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_SEMANTIC_VIEW;
+-- DROP SEMANTIC VIEW IF EXISTS CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_OPS_SV_BASIC;
+-- DROP CORTEX SEARCH SERVICE IF EXISTS CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA.SALES_DOCS_SEARCH;
+-- DROP SECURITY INTEGRATION IF EXISTS SALES_OPS_QUICK_SUITE_OAUTH;
 
-if RUN_CLEANUP:
-    session.use_role("ACCOUNTADMIN")
-    stmts = [
-        f"DROP MCP SERVER IF EXISTS {DB}.{SCHEMA}.SALES_OPS_MCP_SERVER",
-        f"DROP AGENT IF EXISTS {DB}.{SCHEMA}.SALES_OPS_AGENT",
-        f"DROP SEMANTIC VIEW IF EXISTS {DB}.{SCHEMA}.SALES_OPS_SEMANTIC_VIEW",
-        f"DROP SEMANTIC VIEW IF EXISTS {DB}.{SCHEMA}.SALES_OPS_SV_BASIC",
-        f"DROP CORTEX SEARCH SERVICE IF EXISTS {DB}.{SCHEMA}.SALES_DOCS_SEARCH",
-        "DROP SECURITY INTEGRATION IF EXISTS SALES_OPS_QUICK_SUITE_OAUTH",
-    ]
-    if RESTORE_DEFAULT_ROLE:
-        stmts.append(f'ALTER USER "{hol_user}" SET DEFAULT_ROLE = \\'{RESTORE_DEFAULT_ROLE}\\'')
-    if DROP_BASE_OBJECTS:
-        stmts += [f"DROP DATABASE IF EXISTS {DB}", f"DROP WAREHOUSE IF EXISTS {HOL_WH}", f"DROP ROLE IF EXISTS {HOL_ROLE}",
-                  # load.sql で作った Git 連携（ワークスペースを Git から作った場合、先にワークスペースを削除してください）
-                  "DROP DATABASE IF EXISTS QUICK_HOL_GIT_DB", "DROP API INTEGRATION IF EXISTS QUICK_HOL_GIT_INTEGRATION"]
-    for s in stmts:
-        session.sql(s).collect()
-        print("OK:", s)
-else:
-    print("RUN_CLEANUP = False のため何もしていません")'''),
+-- ② 既定ロールを元に戻す（例：ACCOUNTADMIN）
+-- SET HOL_USER = CURRENT_USER();
+-- ALTER USER IDENTIFIER($HOL_USER) SET DEFAULT_ROLE = ACCOUNTADMIN;
+
+-- ③ DB・ウェアハウス・ロール・Git 連携まで消す場合（Git から作ったワークスペースは先に削除してください）
+-- DROP DATABASE IF EXISTS CORTEX_QUICK_HOL_DB;
+-- DROP WAREHOUSE IF EXISTS CORTEX_QUICK_HOL_WH;
+-- DROP ROLE IF EXISTS CORTEX_QUICK_HOL_ROLE;
+-- DROP DATABASE IF EXISTS QUICK_HOL_GIT_DB;
+-- DROP API INTEGRATION IF EXISTS QUICK_HOL_GIT_INTEGRATION;
+SELECT 'コメントを外した行だけが実行されます' AS "メモ\""""),
 ]
 
 
