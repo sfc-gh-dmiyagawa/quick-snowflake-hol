@@ -488,22 +488,10 @@ v1 に次を加えた改善版を、YAML 形式で作ります（`SYSTEM$CREATE_
 | `REPS_BELOW_COVERAGE_TARGET` | パイプラインカバレッジ **1.6 倍未満** の営業担当数 | Sales Performance レポート |
 | `EXPANSION_TARGET_CUSTOMERS` | 解約リスク **30 未満** かつ拡大余地 High/Medium の顧客数 | 社内の定義 |
 
-### 方法 A：GUI で作る（YAML をアップロード）
+### YAML を取り込んで作る
 
-v2 は同義語・KPI・検証済みクエリが多く、画面で 1 つずつ入力すると時間がかかります。GUI では **できあがった YAML を読み込む**方法を使います。
-
-1. GitHub の [`semantic_views/sales_ops_semantic_view.yaml`](../semantic_views/sales_ops_semantic_view.yaml) を PC にダウンロードする
-   （Git 連携したワークスペースなら、左のファイル一覧の `semantic_views/` にもあります）
-2. **「Workspaces」→「Add new」→「Semantic View」** を開き、保存先 `CORTEX_QUICK_HOL_DB` / `CORTEX_QUICK_HOL_SCHEMA` を選ぶ
-3. 文脈の指定で **YAML specification のアップロード** を選び、ダウンロードした YAML を指定する
-4. 作成されたら Semantic Studio で **Metrics**（`STALLED_DEAL_COUNT` など）と **Verified queries** が入っていることを確認する
-5. （デモ）**Synonyms** に同義語を 1 つ追加する、**Verified queries** に質問を 1 つ追加するなど、GUI での編集を試す
-
-> ⚠️ 名前は YAML の中で **`SALES_OPS_SEMANTIC_VIEW`** に決まっています。Step 4 の正答率はこの内容が前提なので、**GUI で大きく変更した場合は方法 B のセルを実行して元に戻してください。**
-
-> ℹ️ GUI の手順は Snowflake 公式ドキュメントをもとに書いています。画面のラベルや順番が多少違う場合があります。\n> 迷ったら **方法 B（SQL）** のセルを実行すれば、同じ名前・同じ設定で作られます（GUI で作ったものは上書きされます）。
-
-### 方法 B：SQL で作る（`SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML`）'''),
+v2 は同義語・KPI・検証済みクエリが多く、画面で 1 つずつ入力すると時間がかかります。そこで、**用意済みの YAML（定義書）を SQL 1 本で取り込み**、中身の確認と追加の編集は GUI で行います。
+YAML の中身は GitHub の [`semantic_views/sales_ops_semantic_view.yaml`](../semantic_views/sales_ops_semantic_view.yaml) と同じです（ダウンロードは不要です）。'''),
     sql("create_semantic_view", SV_CELL),
     md("作成できたか確認し、ハンズオン用ロールに参照権限を付けます。"),
     sql("show_semantic_views", "SHOW SEMANTIC VIEWS IN SCHEMA CORTEX_QUICK_HOL_DB.CORTEX_QUICK_HOL_SCHEMA"),
@@ -528,9 +516,12 @@ ORDER BY TOTAL_REVENUE DESC'''),
 
 1. Snowsight 左メニュー **「AI と ML」→「Cortex Analyst」**（または **「Workspaces」の Semantic Studio**）を開く
 2. `CORTEX_QUICK_HOL_DB` の `SALES_OPS_SEMANTIC_VIEW` をクリック
-3. **Logical tables / Relationships / Metrics / Verified queries** を開き、`SALES_OPS_SV_BASIC` と見比べる
+3. **Logical tables / Relationships / Metrics / Verified queries** を開き、`SALES_OPS_SV_BASIC` と見比べる（`STALLED_DEAL_COUNT` などの社内 KPI や、9 件の検証済みクエリが入っています）
+4. （デモ）GUI で編集してみる：たとえば **Synonyms** に同義語を 1 つ追加する、**Verified queries** に質問と SQL を 1 つ追加する → **Save**
 
-> Semantic View の編集画面から、同義語や検証済みクエリを GUI で追加することもできます。'''),
+> ⚠️ Step 4 の正答率はこの内容が前提です。GUI で大きく変更した場合は、上の `create_semantic_view` セルを再実行すれば元の定義に戻ります。
+>
+> ℹ️ GUI の画面ラベルは公式ドキュメントをもとに書いています。実際の表記と多少違う場合があります。'''),
     md('''## Step 4. 正答率を比べる（v1 vs v2）
 
 同じ 9 問を v1・v2 それぞれに投げ、**Analyst が生成した SQL を実行して、結果に正解の値が含まれるか**で自動採点します。

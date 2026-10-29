@@ -47,7 +47,7 @@ PDF レポート（S3）→ Cortex Search ────────────�
 5. `02` → `03` → `04` → `05` の順に、同じように実行します。05 の Step 5 に、Quick に入力する値が表示されます。
 6. [`docs/02_quick_setup_guide_ja.md`](docs/02_quick_setup_guide_ja.md) に沿って、Quick 側を設定します。
 
-> 💡 05 の Step 3 で、実行ユーザーの **DEFAULT_ROLE をハンズオン用ロールに変更**します。初期ロールが ACCOUNTADMIN のままでは、Quick から OAuth でログインできないためです。変更後も `USE ROLE ACCOUNTADMIN` で管理者作業はできます。元に戻す方法は 05 の末尾にあります。
+> 💡 05 の Step 3 で、実行ユーザーの **DEFAULT_ROLE をハンズオン用ロールに変更**します。Quick からの OAuth ログインでは、ユーザーの DEFAULT_ROLE でセッションが作られます（ログイン時の同意画面に表示されるロールです）。ACCOUNTADMIN などの管理者ロールは OAuth では使えない（既定でブロック）ため、DEFAULT_ROLE が ACCOUNTADMIN のままだとログインが拒否されます。変更しても、Snowsight では今までどおり `USE ROLE ACCOUNTADMIN` で管理者作業ができます。元に戻す方法は 05 の末尾にあります。
 
 ## Semantic View の精度向上（02）
 
