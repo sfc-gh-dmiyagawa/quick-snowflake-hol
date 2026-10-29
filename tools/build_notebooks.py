@@ -672,37 +672,34 @@ FROM {FQ}DOCS_PARSED d,
 FROM {FQ}DOCS_CHUNKS GROUP BY FILE_NAME'''),
     md('''## Step 3. Cortex Search Service を作る
 
-| 設定 | 値 | 意味 |
-|---|---|---|
-| `ON CHUNK` | 検索対象の列 | この列の中身で検索する |
-| `ATTRIBUTES FILE_NAME` | 絞り込みに使える列 | 「このレポートだけ」で絞り込める |
-| `EMBEDDING_MODEL` | `snowflake-arctic-embed-l-v2.0` | **多言語対応**のモデル。英語の PDF を日本語の質問で検索できる |
-| `TARGET_LAG` | `1 day` | 元のテーブルが変わったときに追従する間隔 |
+Step 2 の `DOCS_CHUNKS` を検索サービスにします。決めることは次の 5 つで、GUI の各ステップと SQL の各句は 1 対 1 で対応しています。
 
-> 💡 既定のモデルは英語向けです。日本語で質問する場合は多言語モデルを指定してください（このハンズオンで実際に、既定モデルでは日本語の質問に対して関係の薄い表が上位に来ました）。
+| GUI のステップ | SQL | 今回の値 | 何のために決めるか |
+|---|---|---|---|
+| データを選択 | `AS SELECT ... FROM` | `DOCS_CHUNKS` テーブル | 検索対象にする文書（1 行 = 1 チャンク）を決める |
+| 検索列を選択 | `ON` | `CHUNK` | **質問と照らし合わせる本文**。この列がベクトル化され、意味とキーワードの両方で検索されます |
+| 属性を選択 | `ATTRIBUTES` | `FILE_NAME` | **絞り込みに使う列**。「Sales Performance Analysis だけから探す」のように、検索時にフィルタをかけられます |
+| 列を選択 | `AS SELECT` の列 | `CHUNK_ID` / `CHUNK` / `FILE_NAME` / `CHUNK_NO` | **検索結果として返す列**。04 の Agent は `CHUNK_ID` を出典の ID、`FILE_NAME` を出典名として使うので、必ず含めます |
+| インデックス作成を構成 | `WAREHOUSE` / `TARGET_LAG` / `EMBEDDING_MODEL` | `CORTEX_QUICK_HOL_WH` / `1 day` / `snowflake-arctic-embed-l-v2.0` | 索引を作るウェアハウス、元データの変更に追従する間隔、ベクトル化に使うモデル |
+
+> 💡 **埋め込みモデルは多言語のものを選びます。** 既定のモデルは英語向けで、このハンズオンで試したところ、日本語の質問に対して関係の薄い表が上位に来ました。`snowflake-arctic-embed-l-v2.0` なら、英語の PDF を日本語の質問で検索できます。
 >
 > 作成には 1〜2 分かかります。
 
 ### 方法 A：GUI（AI と ML → Cortex Search）で作る
 
-Step 1・2 で作った `DOCS_CHUNKS` テーブルを、画面から検索サービスにします。
+1. Snowsight 左メニュー **「AI と ML」→「Cortex Search」** を開き、**「作成」**
+2. **新しいサービス**：ロール `ACCOUNTADMIN`、ウェアハウス `CORTEX_QUICK_HOL_WH`、データベース / スキーマ `CORTEX_QUICK_HOL_DB` / `CORTEX_QUICK_HOL_SCHEMA`、サービス名 **`SALES_DOCS_SEARCH`**（**大文字のまま**）
+3. **データを選択**：テーブル **`DOCS_CHUNKS`**
+4. **検索列を選択**：**`CHUNK`**
+5. **属性を選択**：**`FILE_NAME`**
+6. **列を選択**：`CHUNK_ID` / `CHUNK` / `FILE_NAME` / `CHUNK_NO` の 4 つ
+7. **インデックス作成を構成**：ターゲットラグ **1 day**。埋め込みモデルを選べる場合は **`snowflake-arctic-embed-l-v2.0`** → **作成**
+8. 作成されたら同じ画面の **Playground** で「推奨されるパイプラインカバレッジの目安は？」と検索し、1.6 倍が書かれた段落が上位に来ることを確かめる
 
-1. Snowsight 左メニュー **「AI と ML」→「Cortex Search」** を開き、**「Create」**
-2. ロールは `ACCOUNTADMIN`、ウェアハウスは **`CORTEX_QUICK_HOL_WH`**
-3. データベース / スキーマに `CORTEX_QUICK_HOL_DB` / `CORTEX_QUICK_HOL_SCHEMA`、サービス名に **`SALES_DOCS_SEARCH`**（**大文字のまま**）を入力し、**Next**
-4. データの種類は **Table or view** → **`DOCS_CHUNKS`** を選び、**Next**
-5. 検索結果に含める列：`CHUNK_ID` / `CHUNK` / `FILE_NAME` / `CHUNK_NO` → **Next**
-6. 検索する列：**`CHUNK`** → **Next**
-7. 絞り込みに使う列：**`FILE_NAME`** → **Next**
-8. Target lag は **1 day** にして **Create**
-9. 作成されたら同じ画面の **Playground** で「推奨されるパイプラインカバレッジの目安は？」と検索してみる
-
-> ⚠️ **埋め込みモデル**：画面でモデルを選べない場合、既定の英語向けモデルで作られ、日本語の質問の精度が下がります。
-> その場合は **方法 B のセルを実行**して、多言語モデル（`snowflake-arctic-embed-l-v2.0`）で作り直してください。
+> ⚠️ 埋め込みモデルを選べなかった場合は英語向けのモデルで作られるため、**方法 B のセルを実行して作り直してください**（同じ名前で上書きされます）。
 >
 > ⚠️ GUI ではサービス名がダブルクォート付きで作られます。小文字が混じると SQL や Agent から `SALES_DOCS_SEARCH` で参照できなくなるため、**必ず大文字で入力**してください。
-
-> ℹ️ GUI の手順は Snowflake 公式ドキュメントをもとに書いています。画面のラベルや順番が多少違う場合があります。\n> 迷ったら **方法 B（SQL）** のセルを実行すれば、同じ名前・同じ設定で作られます（GUI で作ったものは上書きされます）。
 
 ### 方法 B：SQL で作る（`CREATE CORTEX SEARCH SERVICE`）'''),
     sql("create_search_service", f'''CREATE OR REPLACE CORTEX SEARCH SERVICE {FQ}SALES_DOCS_SEARCH
